@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
-// Empty string: Vite proxy forwards /api/* and /admin-login to http://localhost:5000
 const API = "https://optirelay-ties.onrender.com";
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
@@ -43,33 +42,228 @@ const SPONSORS = [
   { id: 5, name: "IndustrialX", color: "#22d3ee", letter: "IX" },
 ];
 
-// ─── STORAGE HELPERS ──────────────────────────────────────────────────────────
-const LS = {
-  get: (k, def) => { try { const v = localStorage.getItem(k); return v !== null ? JSON.parse(v) : def; } catch { return def; } },
-  set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
-};
-function useLS(key, def) {
-  const [val, setVal] = useState(() => LS.get(key, def));
-  const set = (v) => { setVal(v); LS.set(key, v); };
-  return [val, set];
-}
-function useSyncLS(key, def, interval = 300) {
-  const [val, setVal] = useState(() => LS.get(key, def));
-  useEffect(() => {
-    const id = setInterval(() => {
-      const v = LS.get(key, def);
-      setVal(prev => JSON.stringify(prev) !== JSON.stringify(v) ? v : prev);
-    }, interval);
-    return () => clearInterval(id);
-  }, [key]);
-  return val;
-}
-
 // ─── API HELPERS ──────────────────────────────────────────────────────────────
 async function apiFetch(path, opts = {}) {
-  const res = await fetch(`${API}${path}`, { headers: { "Content-Type": "application/json" }, ...opts });
+  const res = await fetch(`${API}${path}`, {
+    headers: { "Content-Type": "application/json" },
+    ...opts,
+  });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
+}
+
+// ─── HOOK: poll backend state for display ─────────────────────────────────────
+function useRemoteState(interval = 1000) {
+  const [state, setState] = useState({
+    screen: "welcome",
+    roundNum: 1,
+    subPhase: "instructions",
+    qIndex: 0,
+    showAnswer: false,
+    timeLeft: 30,
+    timerRunning: false,
+  });
+  const [teams, setTeams] = useState([]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function poll() {
+      try {
+        const [s, t] = await Promise.all([
+          apiFetch("/api/state"),
+          apiFetch("/api/teams"),
+        ]);
+        if (!cancelled) {
+          setState(s);
+          setTeams(t);
+        }
+      } catch {}
+    }
+
+    poll();
+    const id = setInterval(poll, interval);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [interval]);
+
+  return { state, teams };
+}
+
+// ─── HOOK: admin state (writes to backend, local echo for responsiveness) ─────
+function useAdminState() {
+  const [state, setState] = useState({
+    screen: "welcome",
+    roundNum: 1,
+    subPhase: "instructions",
+    qIndex: 0,
+    showAnswer: false,
+    timeLeft: 30,
+    timerRunning: false,
+  });
+  const [teams, setTeams] = useState([]);
+  const [dbStatus, setDbStatus] = useState("idle");
+  const [dbMsg, setDbMsg] = useState("");
+  const timerRef = useRef(null);
+  const timerRunningRef = useRef(false);
+
+  // Fetch initial state and teams
+  const fetchAll = useCallback(async () => {
+    try {
+      setDbStatus("loading");
+      const [s, t] = await Promise.all([
+        apiFetch("/api/state"),
+        apiFetch("/api/teams"),
+      ]);
+      setState(s);
+      setTeams(t);
+      setDbStatus("ok");
+      setDbMsg(`Synced ${t.length} teams from DB`);
+    } catch {
+      setDbStatus("error");
+      setDbMsg("Backend offline");
+    }
+  }, []);
+
+  useEffect(() => { fetchAll(); }, []);
+
+  // Poll teams every 5s
+  useEffect(() => {
+    const id = setInterval(async () => {
+      try { const t = await apiFetch("/api/teams"); setTeams(t); } catch {}
+    }, 5000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Push a state patch to backend and update local echo
+  const patchState = useCallback(async (patch) => {
+    setState(prev => ({ ...prev, ...patch }));
+    try {
+      await apiFetch("/api/state", {
+        method: "PATCH",
+        body: JSON.stringify(patch),
+      });
+    } catch {
+      setDbStatus("error");
+      setDbMsg("State sync failed — check backend");
+    }
+  }, []);
+
+  // Timer logic — admin device drives server-side timer via timerEndsAt
+  const maxTime = useCallback((rn) => (rn === 1 ? 30 : 45), []);
+
+  const startTimer = useCallback((roundNum) => {
+    if (timerRunningRef.current) return;
+    timerRunningRef.current = true;
+    const duration = maxTime(roundNum);
+    const endsAt = Date.now() + duration * 1000;
+
+    // tell the server
+    patchState({ timerRunning: true, timerEndsAt: endsAt, timeLeft: duration });
+
+    // local countdown for admin UI
+    setState(prev => ({ ...prev, timeLeft: duration, timerRunning: true }));
+    clearInterval(timerRef.current);
+    timerRef.current = setInterval(() => {
+      setState(prev => {
+        const next = prev.timeLeft - 1;
+        if (next <= 0) {
+          clearInterval(timerRef.current);
+          timerRunningRef.current = false;
+          // no need to patch — server auto-computes from timerEndsAt
+          return { ...prev, timeLeft: 0, timerRunning: false };
+        }
+        return { ...prev, timeLeft: next };
+      });
+    }, 1000);
+  }, [patchState, maxTime]);
+
+  const stopTimer = useCallback(() => {
+    clearInterval(timerRef.current);
+    timerRunningRef.current = false;
+    setState(prev => ({ ...prev, timerRunning: false }));
+    patchState({ timerRunning: false, timerEndsAt: 0 });
+  }, [patchState]);
+
+  const resetTimer = useCallback((roundNum) => {
+    stopTimer();
+    const t = maxTime(roundNum);
+    setState(prev => ({ ...prev, timeLeft: t }));
+    patchState({ timeLeft: t, timerRunning: false, timerEndsAt: 0 });
+  }, [stopTimer, maxTime, patchState]);
+
+  // Navigation helpers
+  const startRound = useCallback((rn) => {
+    stopTimer();
+    patchState({ screen: "round", roundNum: rn, qIndex: 0, showAnswer: false, subPhase: "instructions", timerRunning: false, timerEndsAt: 0, timeLeft: rn === 1 ? 30 : 45 });
+  }, [patchState, stopTimer]);
+
+  const startCountdown = useCallback(() => {
+    patchState({ subPhase: "countdown" });
+    setTimeout(() => patchState({ subPhase: "question" }), 6000);
+  }, [patchState]);
+
+  const nextQ = useCallback((currentQIndex, roundNum, qs) => {
+    if (currentQIndex < qs.length - 1) {
+      const t = maxTime(roundNum);
+      patchState({ qIndex: currentQIndex + 1, showAnswer: false, timeLeft: t, timerRunning: false, timerEndsAt: 0 });
+      stopTimer();
+    }
+  }, [patchState, stopTimer, maxTime]);
+
+  const prevQ = useCallback((currentQIndex, roundNum) => {
+    if (currentQIndex > 0) {
+      const t = maxTime(roundNum);
+      patchState({ qIndex: currentQIndex - 1, showAnswer: false, timeLeft: t, timerRunning: false, timerEndsAt: 0 });
+      stopTimer();
+    }
+  }, [patchState, stopTimer, maxTime]);
+
+  // Team operations
+  const addTeam = useCallback(async (name) => {
+    if (!name.trim()) return;
+    try {
+      const team = await apiFetch("/api/teams", { method: "POST", body: JSON.stringify({ name: name.trim() }) });
+      setTeams(prev => [...prev, team]);
+    } catch {
+      setTeams(prev => [...prev, { id: Date.now(), name: name.trim(), r1: 0, r2: 0, r3: 0 }]);
+    }
+  }, []);
+
+  const removeTeam = useCallback(async (t) => {
+    const id = t._id || t.id;
+    try { await apiFetch(`/api/teams/${id}`, { method: "DELETE" }); } catch {}
+    setTeams(prev => prev.filter(x => (x._id || x.id) !== id));
+  }, []);
+
+  const updateScore = useCallback(async (t, round, delta) => {
+    const id = t._id || t.id;
+    const nv = Math.max(0, (t[round] || 0) + delta);
+    setTeams(prev => prev.map(x => (x._id || x.id) === id ? { ...x, [round]: nv } : x));
+    try { await apiFetch(`/api/teams/${id}`, { method: "PATCH", body: JSON.stringify({ [round]: nv }) }); } catch {}
+  }, []);
+
+  const setScore = useCallback(async (t, round, val) => {
+    const id = t._id || t.id;
+    const n = Math.max(0, parseInt(val) || 0);
+    setTeams(prev => prev.map(x => (x._id || x.id) === id ? { ...x, [round]: n } : x));
+    try { await apiFetch(`/api/teams/${id}`, { method: "PATCH", body: JSON.stringify({ [round]: n }) }); } catch {}
+  }, []);
+
+  const resetAllScores = useCallback(async () => {
+    if (!window.confirm("Reset ALL scores to 0?")) return;
+    for (const t of teams) {
+      try { await apiFetch(`/api/teams/${t._id || t.id}`, { method: "PATCH", body: JSON.stringify({ r1: 0, r2: 0, r3: 0 }) }); } catch {}
+    }
+    setTeams(prev => prev.map(t => ({ ...t, r1: 0, r2: 0, r3: 0 })));
+  }, [teams]);
+
+  return {
+    state, teams, dbStatus, dbMsg,
+    patchState, fetchAll,
+    startRound, startCountdown, nextQ, prevQ,
+    startTimer, stopTimer, resetTimer, maxTime,
+    addTeam, removeTeam, updateScore, setScore, resetAllScores,
+  };
 }
 
 // ─── SHARED UI ────────────────────────────────────────────────────────────────
@@ -107,7 +301,6 @@ function CornerAccents({ color = "rgba(0,212,170,0.5)" }) {
   </>;
 }
 
-// ─── SPONSOR TICKER ───────────────────────────────────────────────────────────
 function SponsorTicker() {
   const [offset, setOffset] = useState(0);
   useEffect(() => {
@@ -180,7 +373,7 @@ function WelcomeScreen() {
         <div style={{ fontSize: 13, letterSpacing: 6, color: "rgba(255,255,255,0.4)", marginBottom: 36, textTransform: "uppercase" }}>THINK FAST &nbsp;|&nbsp; OPTIMIZE SMART &nbsp;|&nbsp; EXECUTE TOGETHER</div>
         <div style={{ width: 200, height: 1, marginBottom: 36, background: "linear-gradient(90deg, transparent, #00d4aa, transparent)" }} />
         {timeLeft.done ? (
-          <div style={{ fontFamily: "'Orbitron', monospace", fontSize: 28, color: "#00d4aa", letterSpacing: 4, animation: "pulse 1s ease-in-out infinite", marginBottom: 20 }}>🚀 EVENT IS LIVE!</div>
+          <div style={{ fontFamily: "'Orbitron', monospace", fontSize: 28, color: "#00d4aa", letterSpacing: 4, marginBottom: 20 }}>🚀 EVENT IS LIVE!</div>
         ) : (
           <>
             <div style={{ fontSize: 12, letterSpacing: 6, color: "rgba(255,255,255,0.3)", marginBottom: 18, textTransform: "uppercase" }}>EVENT BEGINS IN</div>
@@ -256,16 +449,16 @@ function RoundInstructions({ roundNum }) {
 }
 
 // ─── COUNTDOWN SCREEN ─────────────────────────────────────────────────────────
-function CountdownScreen({ onDone }) {
+function CountdownScreen() {
   const [count, setCount] = useState(5);
-  useEffect(() => { if (count <= 0) { onDone(); return; } const id = setTimeout(() => setCount(c => c - 1), 1000); return () => clearTimeout(id); }, [count]);
+  useEffect(() => { const id = setInterval(() => setCount(c => Math.max(0, c - 1)), 1000); return () => clearInterval(id); }, []);
   return (
     <div style={{ width: "100vw", height: "100vh", background: "#020f0d", display: "flex", alignItems: "center", justifyContent: "center", position: "relative" }}>
       <GridBg />
       <div style={{ position: "relative", zIndex: 3, textAlign: "center", paddingBottom: 44 }}>
         {count > 0
-          ? <div style={{ fontFamily: "'Orbitron', monospace", fontSize: "clamp(140px, 28vw, 260px)", fontWeight: 900, color: "#00d4aa", lineHeight: 1, textShadow: "0 0 80px rgba(0,212,170,0.4)", animation: "countPop 0.8s ease-out" }}>{count}</div>
-          : <div style={{ fontFamily: "'Orbitron', monospace", fontSize: "clamp(60px, 12vw, 120px)", fontWeight: 900, color: "#00d4aa", letterSpacing: 8, animation: "countPop 0.5s ease-out" }}>GO!</div>}
+          ? <div style={{ fontFamily: "'Orbitron', monospace", fontSize: "clamp(140px, 28vw, 260px)", fontWeight: 900, color: "#00d4aa", lineHeight: 1, textShadow: "0 0 80px rgba(0,212,170,0.4)" }}>{count}</div>
+          : <div style={{ fontFamily: "'Orbitron', monospace", fontSize: "clamp(60px, 12vw, 120px)", fontWeight: 900, color: "#00d4aa", letterSpacing: 8 }}>GO!</div>}
         <div style={{ fontSize: 14, letterSpacing: 6, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", marginTop: 20 }}>STARTING ROUND</div>
       </div>
       <SponsorTicker />
@@ -288,11 +481,9 @@ function Round3CaseScreen({ teams }) {
   const podiumColors = ["#FFD700", "#C0C0C0", "#CD7F32", "#4a9eff", "#a855f7", "#ff6b35", "#22d3ee"];
   const medals = ["🥇", "🥈", "🥉"];
   const maxScore = Math.max(...teams.map(t => t.r1 + t.r2 + t.r3), 1);
-
   return (
     <div style={{ width: "100vw", height: "100vh", background: "#020f0d", display: "flex", flexDirection: "column", position: "relative", fontFamily: "'Rajdhani', sans-serif" }}>
       <GridBg />
-      {isUrgent && !isDone && <div style={{ position: "absolute", inset: 0, zIndex: 1, background: "rgba(255,100,50,0.04)", animation: "urgentPulse 2s ease-in-out infinite", pointerEvents: "none" }} />}
       <div style={{ position: "relative", zIndex: 3, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 40px", borderBottom: "1px solid rgba(255,107,53,0.2)", flexShrink: 0 }}>
         <div>
           <div style={{ fontFamily: "'Orbitron', monospace", fontSize: 10, letterSpacing: 5, color: "#ff6b35", marginBottom: 2 }}>OPTIRELAY 2026 · FINAL ROUND</div>
@@ -300,7 +491,7 @@ function Round3CaseScreen({ teams }) {
         </div>
         <div style={{ textAlign: "center" }}>
           {isDone
-            ? <div style={{ fontFamily: "'Orbitron', monospace", fontSize: 32, fontWeight: 900, color: "#ff4444", letterSpacing: 4, animation: "pulse 1s ease-in-out infinite" }}>PRESENT NOW!</div>
+            ? <div style={{ fontFamily: "'Orbitron', monospace", fontSize: 32, fontWeight: 900, color: "#ff4444", letterSpacing: 4 }}>PRESENT NOW!</div>
             : <>
                 <div style={{ fontSize: 10, letterSpacing: 4, color: "rgba(255,255,255,0.3)", marginBottom: 4 }}>PREP TIME REMAINING</div>
                 <div style={{ fontFamily: "'Orbitron', monospace", fontSize: 52, fontWeight: 900, lineHeight: 1, color: isUrgent ? "#ff4444" : "#ff6b35", transition: "color 0.5s" }}>
@@ -324,14 +515,7 @@ function Round3CaseScreen({ teams }) {
             <div style={{ fontFamily: "'Orbitron', monospace", fontSize: 16, fontWeight: 700, color: "#fff", lineHeight: 1.4, marginBottom: 12 }}>Case study distributed to all teams</div>
             <div style={{ fontSize: 14, color: "rgba(255,255,255,0.5)", lineHeight: 1.7 }}>Read carefully, identify the core industrial engineering problem, and build a structured, data-backed solution. Use IE tools — lean, Six Sigma, process mapping — wherever applicable.</div>
           </div>
-          <div style={{ fontSize: 11, letterSpacing: 4, color: "rgba(255,107,53,0.7)", textTransform: "uppercase", marginBottom: 14 }}>EVALUATION CRITERIA</div>
-          {[
-            { label: "Problem Identification", pct: 20, desc: "Correctly diagnose the root cause" },
-            { label: "Solution Feasibility", pct: 30, desc: "Practical & implementable approach" },
-            { label: "IE Tool Usage", pct: 25, desc: "Correct application of IE methods" },
-            { label: "Presentation Clarity", pct: 15, desc: "Structure, flow, and communication" },
-            { label: "Q&A Handling", pct: 10, desc: "Depth of understanding on the spot" },
-          ].map((cr, i) => (
+          {[{ label: "Problem Identification", pct: 20, desc: "Correctly diagnose the root cause" }, { label: "Solution Feasibility", pct: 30, desc: "Practical & implementable approach" }, { label: "IE Tool Usage", pct: 25, desc: "Correct application of IE methods" }, { label: "Presentation Clarity", pct: 15, desc: "Structure, flow, and communication" }, { label: "Q&A Handling", pct: 10, desc: "Depth of understanding on the spot" }].map((cr, i) => (
             <div key={i} style={{ marginBottom: 14 }}>
               <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
                 <span style={{ fontSize: 13, color: "#fff", fontWeight: 600 }}>{cr.label}</span>
@@ -346,35 +530,26 @@ function Round3CaseScreen({ teams }) {
         </div>
         <div style={{ width: "48%", padding: "24px 28px 56px", overflowY: "auto" }}>
           <div style={{ fontSize: 11, letterSpacing: 4, color: "rgba(255,107,53,0.7)", textTransform: "uppercase", marginBottom: 16 }}>STANDINGS ENTERING ROUND 3</div>
-          {sorted.length === 0
-            ? <div style={{ color: "rgba(255,255,255,0.2)", fontSize: 14, letterSpacing: 3, marginTop: 40, textAlign: "center" }}>NO TEAMS YET</div>
-            : sorted.map((t, i) => {
-                const id = t._id || t.id;
-                const total = t.r1 + t.r2 + t.r3;
-                const c = i < podiumColors.length ? podiumColors[i] : "rgba(255,255,255,0.5)";
-                return (
-                  <div key={id} style={{ marginBottom: 12, padding: "14px 18px", background: i === 0 ? "rgba(255,215,0,0.05)" : "rgba(255,255,255,0.02)", border: `1px solid ${i === 0 ? "rgba(255,215,0,0.2)" : "rgba(255,255,255,0.06)"}`, borderRadius: 12 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-                      <span style={{ fontFamily: "'Orbitron', monospace", fontSize: 16, color: c, minWidth: 30 }}>{medals[i] || `#${i + 1}`}</span>
-                      <span style={{ fontSize: 15, fontWeight: 700, color: "#fff", flex: 1 }}>{t.name}</span>
-                      <span style={{ fontFamily: "'Orbitron', monospace", fontSize: 22, fontWeight: 900, color: c }}>{total}</span>
-                    </div>
-                    <div style={{ height: 4, background: "rgba(255,255,255,0.06)", borderRadius: 2 }}>
-                      <div style={{ height: "100%", width: `${(total / maxScore) * 100}%`, background: c, borderRadius: 2, transition: "width 0.6s" }} />
-                    </div>
-                    <div style={{ display: "flex", gap: 12, marginTop: 6 }}>
-                      {[["R1", t.r1, "#00d4aa"], ["R2", t.r2, "#4a9eff"]].map(([lbl, score, lc]) => (
-                        <span key={lbl} style={{ fontSize: 11, color: "rgba(255,255,255,0.3)" }}><span style={{ color: lc }}>{lbl}</span>:{score}</span>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })}
+          {sorted.map((t, i) => {
+            const total = t.r1 + t.r2 + t.r3;
+            const c = podiumColors[i] || "rgba(255,255,255,0.5)";
+            return (
+              <div key={t._id || t.id} style={{ marginBottom: 12, padding: "14px 18px", background: i === 0 ? "rgba(255,215,0,0.05)" : "rgba(255,255,255,0.02)", border: `1px solid ${i === 0 ? "rgba(255,215,0,0.2)" : "rgba(255,255,255,0.06)"}`, borderRadius: 12 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+                  <span style={{ fontFamily: "'Orbitron', monospace", fontSize: 16, color: c, minWidth: 30 }}>{medals[i] || `#${i + 1}`}</span>
+                  <span style={{ fontSize: 15, fontWeight: 700, color: "#fff", flex: 1 }}>{t.name}</span>
+                  <span style={{ fontFamily: "'Orbitron', monospace", fontSize: 22, fontWeight: 900, color: c }}>{total}</span>
+                </div>
+                <div style={{ height: 4, background: "rgba(255,255,255,0.06)", borderRadius: 2 }}>
+                  <div style={{ height: "100%", width: `${(total / maxScore) * 100}%`, background: c, borderRadius: 2 }} />
+                </div>
+              </div>
+            );
+          })}
         </div>
       </div>
       <SponsorTicker />
       <CornerAccents color="rgba(255,107,53,0.6)" />
-      <style>{`@keyframes urgentPulse{0%,100%{opacity:0}50%{opacity:1}}`}</style>
     </div>
   );
 }
@@ -384,17 +559,6 @@ function LeaderboardSidebar({ teams }) {
   const sorted = [...teams].sort((a, b) => (b.r1 + b.r2 + b.r3) - (a.r1 + a.r2 + a.r3));
   const podiumColors = ["#FFD700", "#C0C0C0", "#CD7F32", "#4a9eff", "#a855f7", "#ff6b35", "#22d3ee"];
   const medals = ["🥇", "🥈", "🥉"];
-  const prevRef = useRef({});
-  const [animating, setAnimating] = useState({});
-  useEffect(() => {
-    const newOrder = {};
-    sorted.forEach((t, i) => { newOrder[t._id || t.id] = i; });
-    const newAnim = {};
-    Object.entries(newOrder).forEach(([id, ni]) => { const pi = prevRef.current[id]; if (pi !== undefined && pi !== ni) newAnim[id] = ni < pi ? "up" : "down"; });
-    setAnimating(newAnim);
-    prevRef.current = newOrder;
-    if (Object.keys(newAnim).length > 0) { const t = setTimeout(() => setAnimating({}), 1200); return () => clearTimeout(t); }
-  }, [JSON.stringify(sorted.map(t => (t._id || t.id) + t.r1 + t.r2 + t.r3))]);
   const max = Math.max(...teams.map(t => t.r1 + t.r2 + t.r3), 1);
   return (
     <div style={{ width: "30%", height: "100%", borderRight: "1px solid rgba(74,158,255,0.2)", display: "flex", flexDirection: "column", background: "rgba(0,0,0,0.3)", backdropFilter: "blur(4px)" }}>
@@ -403,34 +567,27 @@ function LeaderboardSidebar({ teams }) {
         <div style={{ fontFamily: "'Orbitron', monospace", fontSize: 15, fontWeight: 900, color: "#fff", letterSpacing: 2 }}>LEADERBOARD</div>
       </div>
       <div style={{ flex: 1, overflowY: "auto", padding: "10px 14px", display: "flex", flexDirection: "column", gap: 7 }}>
-        {teams.length === 0 ? <div style={{ color: "rgba(255,255,255,0.2)", fontSize: 12, textAlign: "center", marginTop: 20, letterSpacing: 2 }}>NO TEAMS</div>
-          : sorted.map((t, i) => {
-              const id = t._id || t.id;
-              const total = t.r1 + t.r2 + t.r3;
-              const anim = animating[id];
-              const rankColor = i < podiumColors.length ? podiumColors[i] : "rgba(255,255,255,0.5)";
-              return (
-                <div key={id} style={{ padding: "10px 12px", borderRadius: 10, background: anim === "up" ? "rgba(0,212,170,0.15)" : anim === "down" ? "rgba(255,80,80,0.1)" : "rgba(255,255,255,0.03)", border: `1px solid ${anim === "up" ? "rgba(0,212,170,0.5)" : anim === "down" ? "rgba(255,80,80,0.3)" : "rgba(255,255,255,0.06)"}`, transition: "all 0.6s cubic-bezier(0.34,1.56,0.64,1)", transform: anim ? "scale(1.02)" : "scale(1)" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5 }}>
-                    <span style={{ fontFamily: "'Orbitron', monospace", fontSize: 13, minWidth: 26, color: rankColor }}>{medals[i] || `#${i + 1}`}</span>
-                    <span style={{ fontSize: 13, fontWeight: 700, color: "#fff", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.name}</span>
-                    <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                      {anim === "up" && <span style={{ fontSize: 11, color: "#00d4aa", animation: "bounceUp 0.6s ease-out" }}>▲</span>}
-                      {anim === "down" && <span style={{ fontSize: 11, color: "#ff5050", animation: "bounceDown 0.6s ease-out" }}>▼</span>}
-                      <span style={{ fontFamily: "'Orbitron', monospace", fontSize: 17, fontWeight: 900, color: rankColor }}>{total}</span>
-                    </div>
-                  </div>
-                  <div style={{ height: 3, background: "rgba(255,255,255,0.06)", borderRadius: 2 }}>
-                    <div style={{ height: "100%", width: `${(total / max) * 100}%`, background: rankColor, borderRadius: 2, transition: "width 0.8s cubic-bezier(0.34,1.56,0.64,1)" }} />
-                  </div>
-                  <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-                    {[["R1", t.r1, "#00d4aa"], ["R2", t.r2, "#4a9eff"], ["R3", t.r3, "#ff6b35"]].map(([lbl, sc, c]) => (
-                      <span key={lbl} style={{ fontSize: 10, color: "rgba(255,255,255,0.3)" }}><span style={{ color: c }}>{lbl}</span>:{sc}</span>
-                    ))}
-                  </div>
-                </div>
-              );
-            })}
+        {sorted.map((t, i) => {
+          const total = t.r1 + t.r2 + t.r3;
+          const rankColor = podiumColors[i] || "rgba(255,255,255,0.5)";
+          return (
+            <div key={t._id || t.id} style={{ padding: "10px 12px", borderRadius: 10, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5 }}>
+                <span style={{ fontFamily: "'Orbitron', monospace", fontSize: 13, minWidth: 26, color: rankColor }}>{medals[i] || `#${i + 1}`}</span>
+                <span style={{ fontSize: 13, fontWeight: 700, color: "#fff", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.name}</span>
+                <span style={{ fontFamily: "'Orbitron', monospace", fontSize: 17, fontWeight: 900, color: rankColor }}>{total}</span>
+              </div>
+              <div style={{ height: 3, background: "rgba(255,255,255,0.06)", borderRadius: 2 }}>
+                <div style={{ height: "100%", width: `${(total / max) * 100}%`, background: rankColor, borderRadius: 2, transition: "width 0.8s" }} />
+              </div>
+              <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+                {[["R1", t.r1, "#00d4aa"], ["R2", t.r2, "#4a9eff"], ["R3", t.r3, "#ff6b35"]].map(([lbl, sc, c]) => (
+                  <span key={lbl} style={{ fontSize: 10, color: "rgba(255,255,255,0.3)" }}><span style={{ color: c }}>{lbl}</span>:{sc}</span>
+                ))}
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -486,7 +643,6 @@ function QuestionScreen({ roundNum, qIndex, showAnswer, timeLeft, teams }) {
       </div>
       <SponsorTicker />
       <CornerAccents />
-      <style>{`@keyframes bounceUp{0%{transform:translateY(4px);opacity:0}60%{transform:translateY(-3px)}100%{transform:translateY(0);opacity:1}}@keyframes bounceDown{0%{transform:translateY(-4px);opacity:0}60%{transform:translateY(3px)}100%{transform:translateY(0);opacity:1}}`}</style>
     </div>
   );
 }
@@ -530,118 +686,41 @@ function ScoreboardScreen({ teams }) {
   );
 }
 
-// ─── DISPLAY APP ──────────────────────────────────────────────────────────────
+// ─── DISPLAY APP — reads from backend ────────────────────────────────────────
 function DisplayApp() {
-  const screen = useSyncLS("screen", "welcome");
-  const roundNum = useSyncLS("roundNum", 1);
-  const subPhase = useSyncLS("subPhase", "instructions");
-  const qIndex = useSyncLS("qIndex", 0);
-  const showAnswer = useSyncLS("showAnswer", false);
-  const timeLeft = useSyncLS("timeLeft", 30);
-  const teams = useSyncLS("teams", []);
+  const { state, teams } = useRemoteState(1000);
+  const { screen, roundNum, subPhase, qIndex, showAnswer, timeLeft } = state;
+
   if (screen === "scoreboard") return <ScoreboardScreen teams={teams} />;
   if (screen === "round") {
     if (subPhase === "instructions") return <RoundInstructions roundNum={roundNum} />;
-    if (subPhase === "countdown") return <CountdownScreen onDone={() => {}} />;
+    if (subPhase === "countdown") return <CountdownScreen />;
     if (roundNum === 3 && subPhase === "casecomp") return <Round3CaseScreen teams={teams} />;
     if (subPhase === "question") return <QuestionScreen roundNum={roundNum} qIndex={qIndex} showAnswer={showAnswer} timeLeft={timeLeft} teams={teams} />;
   }
   return <WelcomeScreen />;
 }
 
-// ─── ADMIN PANEL ──────────────────────────────────────────────────────────────
+// ─── ADMIN APP ────────────────────────────────────────────────────────────────
 function AdminApp() {
-  const [screen, setScreenRaw] = useLS("screen", "welcome");
-  const [roundNum, setRoundNumRaw] = useLS("roundNum", 1);
-  const [subPhase, setSubPhaseRaw] = useLS("subPhase", "instructions");
-  const [qIndex, setQIndexRaw] = useLS("qIndex", 0);
-  const [showAnswer, setShowAnswerRaw] = useLS("showAnswer", false);
-  const [timeLeft, setTimeLeftRaw] = useLS("timeLeft", 30);
-  const [teams, setTeamsRaw] = useLS("teams", []);
+  const {
+    state, teams, dbStatus, dbMsg,
+    patchState, fetchAll,
+    startRound, startCountdown, nextQ, prevQ,
+    startTimer, stopTimer, resetTimer, maxTime,
+    addTeam, removeTeam, updateScore, setScore, resetAllScores,
+  } = useAdminState();
+
+  const { screen, roundNum, subPhase, qIndex, showAnswer, timeLeft, timerRunning } = state;
   const [newTeamName, setNewTeamName] = useState("");
   const [tab, setTab] = useState("control");
-  const timerRef = useRef(null);
-  const [timerRunning, setTimerRunning] = useState(false);
-  const [dbStatus, setDbStatus] = useState("idle");
-  const [dbMsg, setDbMsg] = useState("");
-
-  const setScreen = v => setScreenRaw(v);
-  const setSubPhase = v => setSubPhaseRaw(v);
-  const setQIndex = v => setQIndexRaw(v);
-  const setShowAnswer = v => setShowAnswerRaw(v);
-  const setTimeLeft = v => setTimeLeftRaw(v);
-  const setRoundNum = v => setRoundNumRaw(v);
-
-  const fetchTeams = useCallback(async () => {
-    try {
-      setDbStatus("loading");
-      const data = await apiFetch("/api/teams");
-      setTeamsRaw(data);
-      setDbStatus("ok");
-      setDbMsg(`Synced ${data.length} teams from DB`);
-    } catch {
-      setDbStatus("error");
-      setDbMsg("Backend offline — data saved locally only");
-    }
-  }, []);
-
-  useEffect(() => { fetchTeams(); }, []);
-  useEffect(() => { const id = setInterval(async () => { try { const d = await apiFetch("/api/teams"); setTeamsRaw(d); } catch {} }, 5000); return () => clearInterval(id); }, []);
-
-  const startRound = (rn) => { setRoundNum(rn); setQIndexRaw(0); setShowAnswerRaw(false); setSubPhaseRaw("instructions"); setScreenRaw("round"); setTimerRunning(false); };
-  const startCountdown = () => { setSubPhase("countdown"); setTimeout(() => setSubPhase("question"), 6000); };
-  const maxTime = () => roundNum === 1 ? 30 : 45;
-  const startTimer = () => {
-    if (timerRunning) return; setTimerRunning(true); setTimeLeft(maxTime()); clearInterval(timerRef.current);
-    timerRef.current = setInterval(() => { setTimeLeft(prev => { if (prev <= 1) { clearInterval(timerRef.current); setTimerRunning(false); return 0; } return prev - 1; }); }, 1000);
-  };
-  const stopTimer = () => { clearInterval(timerRef.current); setTimerRunning(false); };
-  const resetTimer = () => { stopTimer(); setTimeLeft(maxTime()); };
-  const nextQ = () => { const qs = QUESTIONS[`round${roundNum}`] || []; if (qIndex < qs.length - 1) { setQIndex(qIndex + 1); setShowAnswer(false); resetTimer(); } };
-  const prevQ = () => { if (qIndex > 0) { setQIndex(qIndex - 1); setShowAnswer(false); resetTimer(); } };
-
-  const addTeam = async () => {
-    if (!newTeamName.trim()) return;
-    try {
-      const team = await apiFetch("/api/teams", { method: "POST", body: JSON.stringify({ name: newTeamName.trim() }) });
-      setTeamsRaw(prev => [...prev, team]);
-    } catch {
-      setTeamsRaw(prev => [...prev, { id: Date.now(), name: newTeamName.trim(), r1: 0, r2: 0, r3: 0 }]);
-    }
-    setNewTeamName("");
-  };
-
-  const removeTeam = async (t) => {
-    const id = t._id || t.id;
-    try { await apiFetch(`/api/teams/${id}`, { method: "DELETE" }); } catch {}
-    setTeamsRaw(prev => prev.filter(x => (x._id || x.id) !== id));
-  };
-
-  const updateScore = async (t, round, delta) => {
-    const id = t._id || t.id;
-    const nv = Math.max(0, (t[round] || 0) + delta);
-    setTeamsRaw(prev => prev.map(x => (x._id || x.id) === id ? { ...x, [round]: nv } : x));
-    try { await apiFetch(`/api/teams/${id}`, { method: "PATCH", body: JSON.stringify({ [round]: nv }) }); } catch {}
-  };
-
-  const setScore = async (t, round, val) => {
-    const id = t._id || t.id;
-    const n = Math.max(0, parseInt(val) || 0);
-    setTeamsRaw(prev => prev.map(x => (x._id || x.id) === id ? { ...x, [round]: n } : x));
-    try { await apiFetch(`/api/teams/${id}`, { method: "PATCH", body: JSON.stringify({ [round]: n }) }); } catch {}
-  };
-
-  const resetAllScores = async () => {
-    if (!window.confirm("Reset ALL scores to 0?")) return;
-    for (const t of teams) { try { await apiFetch(`/api/teams/${t._id || t.id}`, { method: "PATCH", body: JSON.stringify({ r1: 0, r2: 0, r3: 0 }) }); } catch {} }
-    setTeamsRaw(prev => prev.map(t => ({ ...t, r1: 0, r2: 0, r3: 0 })));
-  };
 
   const rc = { 1: "#00d4aa", 2: "#4a9eff", 3: "#ff6b35" }[roundNum] || "#00d4aa";
   const qs = QUESTIONS[`round${roundNum}`] || [];
   const currentQ = qs[qIndex];
 
   const tabStyle = t => ({ padding: "10px 24px", fontFamily: "'Orbitron', monospace", fontSize: 11, letterSpacing: 2, cursor: "pointer", border: "none", borderRadius: 8, background: tab === t ? "#00d4aa" : "rgba(0,212,170,0.08)", color: tab === t ? "#000" : "#00d4aa", fontWeight: 700, transition: "all 0.2s" });
+
   const inBtn = (label, onClick, color = "#00d4aa", disabled = false) => (
     <button onClick={onClick} disabled={disabled} style={{ padding: "8px 14px", fontFamily: "'Orbitron', monospace", fontSize: 10, letterSpacing: 1.5, cursor: disabled ? "default" : "pointer", borderRadius: 6, border: `1px solid ${disabled ? "rgba(255,255,255,0.1)" : color + "55"}`, background: disabled ? "rgba(255,255,255,0.03)" : `${color}15`, color: disabled ? "rgba(255,255,255,0.25)" : color, fontWeight: 700, whiteSpace: "nowrap" }}>{label}</button>
   );
@@ -649,18 +728,25 @@ function AdminApp() {
   return (
     <div style={{ minHeight: "100vh", background: "#020f0d", color: "#fff", fontFamily: "'Rajdhani', sans-serif" }}>
       <GridBg />
+      {/* Header */}
       <div style={{ position: "relative", zIndex: 3, padding: "18px 32px", borderBottom: "1px solid rgba(0,212,170,0.1)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
         <div>
           <div style={{ fontFamily: "'Orbitron', monospace", fontSize: 20, fontWeight: 900, color: "#00d4aa", letterSpacing: 2 }}>⚙ ADMIN PANEL</div>
           <div style={{ fontSize: 11, letterSpacing: 3, color: "rgba(255,255,255,0.3)", marginTop: 2 }}>OPTIRELAY 2026 · NIT JALANDHAR</div>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          {/* DB status */}
           <div style={{ padding: "4px 10px", borderRadius: 6, background: dbStatus === "ok" ? "rgba(0,212,170,0.1)" : dbStatus === "error" ? "rgba(255,80,80,0.1)" : "rgba(255,255,255,0.04)", border: `1px solid ${dbStatus === "ok" ? "rgba(0,212,170,0.3)" : dbStatus === "error" ? "rgba(255,80,80,0.3)" : "rgba(255,255,255,0.1)"}`, fontSize: 10, letterSpacing: 1.5, color: dbStatus === "ok" ? "#00d4aa" : dbStatus === "error" ? "#ff5050" : "rgba(255,255,255,0.3)" }}>
             {dbStatus === "ok" ? "● DB OK" : dbStatus === "error" ? "● DB OFFLINE" : "● CONNECTING"}
           </div>
-          <button onClick={fetchTeams} style={{ padding: "4px 10px", borderRadius: 6, background: "rgba(0,212,170,0.08)", border: "1px solid rgba(0,212,170,0.2)", color: "#00d4aa", fontSize: 10, cursor: "pointer", fontFamily: "'Orbitron', monospace" }}>↺ SYNC</button>
+          <button onClick={fetchAll} style={{ padding: "4px 10px", borderRadius: 6, background: "rgba(0,212,170,0.08)", border: "1px solid rgba(0,212,170,0.2)", color: "#00d4aa", fontSize: 10, cursor: "pointer", fontFamily: "'Orbitron', monospace" }}>↺ SYNC</button>
+          {/* Current screen badge */}
           <div style={{ padding: "5px 12px", borderRadius: 6, background: "rgba(0,212,170,0.08)", border: "1px solid rgba(0,212,170,0.2)", fontSize: 10, letterSpacing: 2, color: "#00d4aa" }}>
             {screen.toUpperCase()} {screen === "round" ? `→ R${roundNum} ${subPhase.toUpperCase()}` : ""}
+          </div>
+          {/* Sync indicator */}
+          <div style={{ padding: "4px 10px", borderRadius: 6, background: "rgba(74,158,255,0.1)", border: "1px solid rgba(74,158,255,0.3)", fontSize: 10, letterSpacing: 1.5, color: "#4a9eff" }}>
+            ⟳ LIVE SYNC
           </div>
         </div>
       </div>
@@ -671,13 +757,18 @@ function AdminApp() {
 
       <div style={{ position: "relative", zIndex: 3, padding: "14px 32px 32px", display: "flex", flexDirection: "column", gap: 14 }}>
 
+        {/* ── CONTROL TAB ── */}
         {tab === "control" && <>
           <div style={{ background: "rgba(0,212,170,0.04)", border: "1px solid rgba(0,212,170,0.15)", borderRadius: 14, padding: 22 }}>
             <div style={{ fontSize: 11, letterSpacing: 4, color: "rgba(0,212,170,0.7)", textTransform: "uppercase", marginBottom: 14 }}>SCREEN NAVIGATION</div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10 }}>
-              {[{ label: "WELCOME", action: () => setScreen("welcome"), s: "#00d4aa" }, { label: "R1 INSTRUCTIONS", action: () => startRound(1), s: "#00d4aa" }, { label: "R2 INSTRUCTIONS", action: () => startRound(2), s: "#4a9eff" }, { label: "R3 INSTRUCTIONS", action: () => startRound(3), s: "#ff6b35" }, { label: "SCOREBOARD", action: () => setScreen("scoreboard"), s: "#a855f7" }].map(({ label, action, s }) => (
-                <GlowButton key={label} onClick={action} color={s}>{label}</GlowButton>
-              ))}
+              {[
+                { label: "WELCOME", action: () => patchState({ screen: "welcome" }), s: "#00d4aa" },
+                { label: "R1 INSTRUCTIONS", action: () => startRound(1), s: "#00d4aa" },
+                { label: "R2 INSTRUCTIONS", action: () => startRound(2), s: "#4a9eff" },
+                { label: "R3 INSTRUCTIONS", action: () => startRound(3), s: "#ff6b35" },
+                { label: "SCOREBOARD", action: () => patchState({ screen: "scoreboard" }), s: "#a855f7" },
+              ].map(({ label, action, s }) => <GlowButton key={label} onClick={action} color={s}>{label}</GlowButton>)}
             </div>
           </div>
 
@@ -687,49 +778,50 @@ function AdminApp() {
               {roundNum !== 3 ? (
                 <>
                   <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
-                    {inBtn("SHOW INSTRUCTIONS", () => setSubPhase("instructions"), rc)}
+                    {inBtn("SHOW INSTRUCTIONS", () => patchState({ subPhase: "instructions" }), rc)}
                     {inBtn("COUNTDOWN → QUESTIONS", () => startCountdown(), rc, subPhase === "countdown")}
-                    {inBtn("JUMP TO QUESTIONS", () => setSubPhase("question"), rc)}
+                    {inBtn("JUMP TO QUESTIONS", () => patchState({ subPhase: "question" }), rc)}
                   </div>
                   {subPhase === "question" && <>
                     <div style={{ background: "rgba(0,0,0,0.3)", borderRadius: 10, padding: 14, marginBottom: 10 }}>
                       <div style={{ fontSize: 10, letterSpacing: 3, color: "rgba(255,255,255,0.3)", marginBottom: 8 }}>QUESTION NAV</div>
                       <div style={{ fontSize: 13, color: "rgba(255,255,255,0.7)", marginBottom: 10 }}>Q{qIndex + 1}/{qs.length}: <span style={{ color: "#fff" }}>{currentQ?.q}</span></div>
                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                        {inBtn("◀ PREV", prevQ, rc, qIndex === 0)}
-                        {inBtn("▶ NEXT", nextQ, rc, qIndex >= qs.length - 1)}
-                        <div style={{ marginLeft: "auto" }}>{inBtn(showAnswer ? "HIDE ANSWER" : "REVEAL ANSWER", () => setShowAnswer(!showAnswer), showAnswer ? "#ff4444" : "#00d4aa")}</div>
+                        {inBtn("◀ PREV", () => prevQ(qIndex, roundNum), rc, qIndex === 0)}
+                        {inBtn("▶ NEXT", () => nextQ(qIndex, roundNum, qs), rc, qIndex >= qs.length - 1)}
+                        <div style={{ marginLeft: "auto" }}>{inBtn(showAnswer ? "HIDE ANSWER" : "REVEAL ANSWER", () => patchState({ showAnswer: !showAnswer }), showAnswer ? "#ff4444" : "#00d4aa")}</div>
                       </div>
                     </div>
                     <div style={{ background: "rgba(0,0,0,0.3)", borderRadius: 10, padding: 14 }}>
                       <div style={{ fontSize: 10, letterSpacing: 3, color: "rgba(255,255,255,0.3)", marginBottom: 8 }}>TIMER — {timeLeft}s</div>
                       <div style={{ height: 5, background: "rgba(255,255,255,0.07)", borderRadius: 3, marginBottom: 10 }}>
-                        <div style={{ height: "100%", width: `${(timeLeft / maxTime()) * 100}%`, background: timeLeft <= 10 ? "#ff4444" : rc, borderRadius: 3, transition: "width 1s linear" }} />
+                        <div style={{ height: "100%", width: `${(timeLeft / maxTime(roundNum)) * 100}%`, background: timeLeft <= 10 ? "#ff4444" : rc, borderRadius: 3, transition: "width 1s linear" }} />
                       </div>
                       <div style={{ display: "flex", gap: 8 }}>
-                        {inBtn(timerRunning ? "⏸ PAUSE" : "▶ START", timerRunning ? stopTimer : startTimer, rc)}
-                        {inBtn("↺ RESET", resetTimer, "#ff6b35")}
+                        {inBtn(timerRunning ? "⏸ PAUSE" : "▶ START", timerRunning ? stopTimer : () => startTimer(roundNum), rc)}
+                        {inBtn("↺ RESET", () => resetTimer(roundNum), "#ff6b35")}
                       </div>
                     </div>
                   </>}
                 </>
               ) : (
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                  {inBtn("SHOW R3 INSTRUCTIONS", () => setSubPhase("instructions"), rc)}
-                  {inBtn("▶ START 20-MIN CASE TIMER", () => setSubPhase("casecomp"), rc)}
+                  {inBtn("SHOW R3 INSTRUCTIONS", () => patchState({ subPhase: "instructions" }), rc)}
+                  {inBtn("▶ START 20-MIN CASE TIMER", () => patchState({ subPhase: "casecomp" }), rc)}
                 </div>
               )}
             </div>
           )}
         </>}
 
+        {/* ── TEAMS TAB ── */}
         {tab === "teams" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <div style={{ background: "rgba(0,212,170,0.04)", border: "1px solid rgba(0,212,170,0.15)", borderRadius: 14, padding: 22 }}>
               <div style={{ fontSize: 11, letterSpacing: 4, color: "rgba(0,212,170,0.7)", textTransform: "uppercase", marginBottom: 14 }}>ADD TEAM</div>
               <div style={{ display: "flex", gap: 10 }}>
-                <input value={newTeamName} onChange={e => setNewTeamName(e.target.value)} onKeyDown={e => e.key === "Enter" && addTeam()} placeholder="Team name..." style={{ flex: 1, padding: "10px 14px", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, color: "#fff", fontSize: 14, outline: "none", fontFamily: "'Rajdhani', sans-serif" }} />
-                <GlowButton onClick={addTeam}>+ ADD</GlowButton>
+                <input value={newTeamName} onChange={e => setNewTeamName(e.target.value)} onKeyDown={e => e.key === "Enter" && addTeam(newTeamName).then(() => setNewTeamName(""))} placeholder="Team name..." style={{ flex: 1, padding: "10px 14px", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, color: "#fff", fontSize: 14, outline: "none", fontFamily: "'Rajdhani', sans-serif" }} />
+                <GlowButton onClick={() => addTeam(newTeamName).then(() => setNewTeamName(""))}>+ ADD</GlowButton>
               </div>
               {dbMsg && <div style={{ marginTop: 8, fontSize: 11, color: dbStatus === "ok" ? "rgba(0,212,170,0.6)" : "rgba(255,100,100,0.6)", letterSpacing: 1 }}>{dbMsg}</div>}
             </div>
@@ -738,32 +830,29 @@ function AdminApp() {
               {teams.length === 0
                 ? <div style={{ color: "rgba(255,255,255,0.3)", fontSize: 14 }}>No teams added yet</div>
                 : <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    {teams.map(t => {
-                      const id = t._id || t.id;
-                      return (
-                        <div key={id} style={{ display: "flex", alignItems: "center", gap: 14, padding: "11px 14px", background: "rgba(255,255,255,0.03)", borderRadius: 9, border: "1px solid rgba(255,255,255,0.06)" }}>
-                          <span style={{ flex: 1, fontSize: 15, fontWeight: 600, color: "#fff" }}>{t.name}</span>
-                          <span style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", letterSpacing: 2 }}>R1:{t.r1} R2:{t.r2} R3:{t.r3} | <span style={{ color: "#00d4aa" }}>{t.r1 + t.r2 + t.r3}</span></span>
-                          <button onClick={() => removeTeam(t)} style={{ background: "rgba(255,80,80,0.1)", border: "1px solid rgba(255,80,80,0.3)", color: "#ff5050", padding: "4px 10px", borderRadius: 6, cursor: "pointer", fontSize: 11, fontFamily: "'Orbitron', monospace" }}>✕</button>
-                        </div>
-                      );
-                    })}
+                    {teams.map(t => (
+                      <div key={t._id || t.id} style={{ display: "flex", alignItems: "center", gap: 14, padding: "11px 14px", background: "rgba(255,255,255,0.03)", borderRadius: 9, border: "1px solid rgba(255,255,255,0.06)" }}>
+                        <span style={{ flex: 1, fontSize: 15, fontWeight: 600, color: "#fff" }}>{t.name}</span>
+                        <span style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", letterSpacing: 2 }}>R1:{t.r1} R2:{t.r2} R3:{t.r3} | <span style={{ color: "#00d4aa" }}>{t.r1 + t.r2 + t.r3}</span></span>
+                        <button onClick={() => removeTeam(t)} style={{ background: "rgba(255,80,80,0.1)", border: "1px solid rgba(255,80,80,0.3)", color: "#ff5050", padding: "4px 10px", borderRadius: 6, cursor: "pointer", fontSize: 11, fontFamily: "'Orbitron', monospace" }}>✕</button>
+                      </div>
+                    ))}
                     <button onClick={resetAllScores} style={{ alignSelf: "flex-start", marginTop: 6, padding: "6px 14px", background: "rgba(255,80,80,0.08)", border: "1px solid rgba(255,80,80,0.2)", color: "#ff5050", borderRadius: 6, cursor: "pointer", fontSize: 10, fontFamily: "'Orbitron', monospace", letterSpacing: 1.5 }}>↺ RESET ALL SCORES</button>
                   </div>}
             </div>
           </div>
         )}
 
+        {/* ── SCORING TAB ── */}
         {tab === "scoring" && (
           teams.length === 0
             ? <div style={{ textAlign: "center", padding: 60, color: "rgba(255,255,255,0.3)", fontSize: 16, letterSpacing: 2 }}>No teams. Add in TEAMS tab.</div>
             : <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 14 }}>
                   {teams.map(t => {
-                    const id = t._id || t.id;
                     const total = t.r1 + t.r2 + t.r3;
                     return (
-                      <div key={id} style={{ background: "rgba(0,212,170,0.04)", border: "1px solid rgba(0,212,170,0.15)", borderRadius: 14, padding: 18 }}>
+                      <div key={t._id || t.id} style={{ background: "rgba(0,212,170,0.04)", border: "1px solid rgba(0,212,170,0.15)", borderRadius: 14, padding: 18 }}>
                         <div style={{ fontSize: 17, fontWeight: 700, color: "#fff", marginBottom: 3 }}>{t.name}</div>
                         <div style={{ fontSize: 11, letterSpacing: 3, color: "#00d4aa", marginBottom: 14 }}>TOTAL: {total}</div>
                         {[["R1", "r1", "#00d4aa"], ["R2", "r2", "#4a9eff"], ["R3", "r3", "#ff6b35"]].map(([label, key, c]) => (
@@ -807,14 +896,12 @@ function AdminApp() {
         @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@400;500;600;700&display=swap');
         @keyframes countPop{0%{transform:scale(1.4);opacity:0}100%{transform:scale(1);opacity:1}}
         @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}
-        @keyframes urgentPulse{0%,100%{opacity:0}50%{opacity:1}}
         *{box-sizing:border-box}
         input[type=number]::-webkit-inner-spin-button{opacity:1}
       `}</style>
     </div>
   );
 }
-
 
 // ─── ADMIN LOGIN GATE ─────────────────────────────────────────────────────────
 function AdminGate() {
@@ -825,59 +912,34 @@ function AdminGate() {
 
   const handleLogin = async () => {
     if (!pw.trim()) return;
-    setLoading(true);
-    setError("");
+    setLoading(true); setError("");
     try {
-      const res = await fetch(`${API}/admin-login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ password: pw }),
-      });
+      const res = await fetch(`${API}/admin-login`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: pw }) });
       const data = await res.json();
-      if (data.success) {
-        setAuthed(true);
-      } else {
-        setError("Incorrect password. Try again.");
-        setPw("");
-      }
+      if (data.success) setAuthed(true);
+      else { setError("Incorrect password. Try again."); setPw(""); }
     } catch {
       setError("Cannot reach server. Is the backend running?");
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   };
 
   if (authed) return <AdminApp />;
 
   return (
     <div style={{ width: "100vw", height: "100vh", background: "#020f0d", display: "flex", alignItems: "center", justifyContent: "center", position: "relative", fontFamily: "'Rajdhani', sans-serif" }}>
-      <GridBg />
-      <CornerAccents />
+      <GridBg /><CornerAccents />
       <div style={{ position: "relative", zIndex: 3, display: "flex", flexDirection: "column", alignItems: "center", width: 340 }}>
         <div style={{ fontFamily: "'Orbitron', monospace", fontSize: 11, letterSpacing: 6, color: "rgba(0,212,170,0.5)", marginBottom: 12 }}>OPTIRELAY 2026</div>
         <div style={{ fontFamily: "'Orbitron', monospace", fontSize: 28, fontWeight: 900, color: "#fff", letterSpacing: 2, marginBottom: 4 }}>ADMIN ACCESS</div>
         <div style={{ width: 60, height: 2, background: "linear-gradient(90deg, transparent, #00d4aa, transparent)", marginBottom: 32 }} />
         <div style={{ width: "100%", background: "rgba(0,212,170,0.04)", border: "1px solid rgba(0,212,170,0.2)", borderRadius: 16, padding: 28, display: "flex", flexDirection: "column", gap: 14 }}>
           <div style={{ fontSize: 11, letterSpacing: 3, color: "rgba(255,255,255,0.3)", textTransform: "uppercase" }}>Enter Password</div>
-          <input
-            type="password"
-            placeholder="••••••••••••"
-            value={pw}
-            autoFocus
-            onChange={e => { setPw(e.target.value); setError(""); }}
-            onKeyDown={e => e.key === "Enter" && handleLogin()}
-            style={{ padding: "12px 16px", borderRadius: 8, border: `1px solid ${error ? "rgba(255,80,80,0.5)" : "rgba(0,212,170,0.3)"}`, background: "rgba(255,255,255,0.04)", color: "#fff", outline: "none", fontFamily: "'Orbitron', monospace", fontSize: 16, letterSpacing: 4, width: "100%", boxSizing: "border-box" }}
-          />
+          <input type="password" placeholder="••••••••••••" value={pw} autoFocus onChange={e => { setPw(e.target.value); setError(""); }} onKeyDown={e => e.key === "Enter" && handleLogin()} style={{ padding: "12px 16px", borderRadius: 8, border: `1px solid ${error ? "rgba(255,80,80,0.5)" : "rgba(0,212,170,0.3)"}`, background: "rgba(255,255,255,0.04)", color: "#fff", outline: "none", fontFamily: "'Orbitron', monospace", fontSize: 16, letterSpacing: 4, width: "100%", boxSizing: "border-box" }} />
           {error && <div style={{ fontSize: 11, color: "#ff5050", letterSpacing: 1, marginTop: -6 }}>⚠ {error}</div>}
-          <button
-            onClick={handleLogin}
-            disabled={loading}
-            style={{ padding: "12px", background: loading ? "rgba(0,212,170,0.3)" : "#00d4aa", border: "none", borderRadius: 8, cursor: loading ? "default" : "pointer", fontWeight: 900, color: "#000", fontFamily: "'Orbitron', monospace", fontSize: 13, letterSpacing: 3, transition: "all 0.2s" }}
+          <button onClick={handleLogin} disabled={loading} style={{ padding: "12px", background: loading ? "rgba(0,212,170,0.3)" : "#00d4aa", border: "none", borderRadius: 8, cursor: loading ? "default" : "pointer", fontWeight: 900, color: "#000", fontFamily: "'Orbitron', monospace", fontSize: 13, letterSpacing: 3 }}
             onMouseEnter={e => { if (!loading) e.currentTarget.style.background = "#00ffcc"; }}
             onMouseLeave={e => { if (!loading) e.currentTarget.style.background = "#00d4aa"; }}
-          >
-            {loading ? "VERIFYING…" : "UNLOCK"}
-          </button>
+          >{loading ? "VERIFYING…" : "UNLOCK"}</button>
         </div>
         <div style={{ marginTop: 20, fontSize: 10, letterSpacing: 3, color: "rgba(255,255,255,0.15)", textTransform: "uppercase" }}>Authorised personnel only</div>
       </div>
