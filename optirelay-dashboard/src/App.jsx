@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
 // Empty string: Vite proxy forwards /api/* and /admin-login to http://localhost:5000
-const API = "";
+const API = "http://localhost:5000";
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 const QUESTIONS = {

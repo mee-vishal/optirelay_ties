@@ -5,38 +5,71 @@ const mongoose = require("mongoose");
 require("dotenv").config();
 
 const app = express();
-app.use(cors());
+
+// ─── CORS CONFIG ──────────────────────────────────────────────────────────────
+const allowedOrigins = [
+  "http://localhost:5173", // local dev (Vite)
+  "https://optirelay.netlify.app", // your deployed frontend
+];
+
+app.use(
+  cors({
+    origin: function (origin, callback) {
+      // allow requests with no origin (like Postman)
+      if (!origin) return callback(null, true);
+
+      if (allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error("❌ Not allowed by CORS"));
+      }
+    },
+    methods: ["GET", "POST", "PATCH", "DELETE"],
+    credentials: true,
+  })
+);
+
+// ─── MIDDLEWARE ───────────────────────────────────────────────────────────────
 app.use(express.json());
 
 const server = http.createServer(app);
 
 // ─── MONGODB ──────────────────────────────────────────────────────────────────
-mongoose.connect(process.env.MONGO_URI || "mongodb://localhost:27017/optirelay")
+mongoose
+  .connect(process.env.MONGO_URI || "mongodb://localhost:27017/optirelay")
   .then(() => console.log("✅ MongoDB connected"))
-  .catch(err => console.error("❌ MongoDB error:", err));
+  .catch((err) => console.error("❌ MongoDB error:", err));
 
-const TeamSchema = new mongoose.Schema({
-  name: { type: String, required: true },
-  r1: { type: Number, default: 0 },
-  r2: { type: Number, default: 0 },
-  r3: { type: Number, default: 0 },
-}, { timestamps: true });
+// ─── SCHEMA ───────────────────────────────────────────────────────────────────
+const TeamSchema = new mongoose.Schema(
+  {
+    name: { type: String, required: true },
+    r1: { type: Number, default: 0 },
+    r2: { type: Number, default: 0 },
+    r3: { type: Number, default: 0 },
+  },
+  { timestamps: true }
+);
 
 const Team = mongoose.model("Team", TeamSchema);
 
 // ─── AUTH ─────────────────────────────────────────────────────────────────────
-// Password is read from .env → ADMIN_PASSWORD
-// The frontend posts { password: "..." } and gets { success: true/false }
 app.post("/admin-login", (req, res) => {
   const { password } = req.body;
-  if (!password) return res.status(400).json({ success: false, error: "No password provided" });
 
-  const correct = process.env.ADMIN_PASSWORD || "ies2026"; // fallback if .env missing
+  if (!password) {
+    return res.status(400).json({
+      success: false,
+      error: "No password provided",
+    });
+  }
+
+  const correct = process.env.ADMIN_PASSWORD || "ies2026";
+
   if (password === correct) {
-    res.json({ success: true });
+    return res.json({ success: true });
   } else {
-    // Use 200 so the frontend can read the body; don't 401 (causes CORS issues on some setups)
-    res.json({ success: false });
+    return res.json({ success: false });
   }
 });
 
@@ -56,10 +89,23 @@ app.get("/api/teams", async (req, res) => {
 app.post("/api/teams", async (req, res) => {
   try {
     const { name } = req.body;
-    if (!name?.trim()) return res.status(400).json({ error: "Name required" });
+
+    if (!name?.trim()) {
+      return res.status(400).json({ error: "Name required" });
+    }
+
     const existing = await Team.findOne({ name: name.trim() });
-    if (existing) return res.status(409).json({ error: "Team already exists" });
-    const team = await Team.create({ name: name.trim(), r1: 0, r2: 0, r3: 0 });
+    if (existing) {
+      return res.status(409).json({ error: "Team already exists" });
+    }
+
+    const team = await Team.create({
+      name: name.trim(),
+      r1: 0,
+      r2: 0,
+      r3: 0,
+    });
+
     res.json(team);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -71,11 +117,19 @@ app.patch("/api/teams/:id", async (req, res) => {
   try {
     const { r1, r2, r3 } = req.body;
     const update = {};
+
     if (r1 !== undefined) update.r1 = Math.max(0, r1);
     if (r2 !== undefined) update.r2 = Math.max(0, r2);
     if (r3 !== undefined) update.r3 = Math.max(0, r3);
-    const team = await Team.findByIdAndUpdate(req.params.id, update, { new: true });
-    if (!team) return res.status(404).json({ error: "Team not found" });
+
+    const team = await Team.findByIdAndUpdate(req.params.id, update, {
+      new: true,
+    });
+
+    if (!team) {
+      return res.status(404).json({ error: "Team not found" });
+    }
+
     res.json(team);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -92,7 +146,7 @@ app.delete("/api/teams/:id", async (req, res) => {
   }
 });
 
-// DELETE all teams (reset)
+// DELETE all teams
 app.delete("/api/teams", async (req, res) => {
   try {
     await Team.deleteMany({});
@@ -102,6 +156,9 @@ app.delete("/api/teams", async (req, res) => {
   }
 });
 
-// ─── START ────────────────────────────────────────────────────────────────────
+// ─── START SERVER ─────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 5000;
-server.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+
+server.listen(PORT, () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+});
