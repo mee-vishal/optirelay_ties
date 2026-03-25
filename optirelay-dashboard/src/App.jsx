@@ -2,6 +2,8 @@ import { useState, useEffect, useRef, useCallback } from "react";
 
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
 const API = "https://optirelay-ties.onrender.com";
+// Convert https → wss automatically
+const WS_URL = API.replace(/^https/, "wss").replace(/^http/, "ws");
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 const QUESTIONS = {
@@ -42,225 +44,226 @@ const SPONSORS = [
   { id: 5, name: "IndustrialX", color: "#22d3ee", letter: "IX" },
 ];
 
-// ─── API HELPERS ──────────────────────────────────────────────────────────────
-async function apiFetch(path, opts = {}) {
-  const res = await fetch(`${API}${path}`, {
-    headers: { "Content-Type": "application/json" },
-    ...opts,
-  });
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
-}
+// ─── WEBSOCKET HOOK ───────────────────────────────────────────────────────────
+// Returns { ws, connected } — a stable ref to the live WebSocket
+function useWebSocket(onMessage) {
+  const wsRef = useRef(null);
+  const [connected, setConnected] = useState(false);
+  const reconnectTimer = useRef(null);
+  const onMessageRef = useRef(onMessage);
+  onMessageRef.current = onMessage;
 
-// ─── HOOK: poll backend state for display ─────────────────────────────────────
-function useRemoteState(interval = 1000) {
-  const [state, setState] = useState({
-    screen: "welcome",
-    roundNum: 1,
-    subPhase: "instructions",
-    qIndex: 0,
-    showAnswer: false,
-    timeLeft: 30,
-    timerRunning: false,
-  });
-  const [teams, setTeams] = useState([]);
+  const connect = useCallback(() => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) return;
+
+    const ws = new WebSocket(WS_URL);
+    wsRef.current = ws;
+
+    ws.onopen = () => {
+      setConnected(true);
+      console.log("✅ WS connected");
+      clearTimeout(reconnectTimer.current);
+    };
+
+    ws.onmessage = (e) => {
+      try {
+        const msg = JSON.parse(e.data);
+        onMessageRef.current(msg);
+      } catch {}
+    };
+
+    ws.onclose = () => {
+      setConnected(false);
+      console.log("WS closed, reconnecting in 2s…");
+      reconnectTimer.current = setTimeout(connect, 2000);
+    };
+
+    ws.onerror = () => {
+      ws.close();
+    };
+  }, []);
 
   useEffect(() => {
-    let cancelled = false;
+    connect();
+    // Keepalive ping every 25s (Render closes idle WS after 30s)
+    const pingId = setInterval(() => {
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: "ping" }));
+      }
+    }, 25000);
+    return () => {
+      clearInterval(pingId);
+      clearTimeout(reconnectTimer.current);
+      wsRef.current?.close();
+    };
+  }, [connect]);
 
-    async function poll() {
-      try {
-        const [s, t] = await Promise.all([
-          apiFetch("/api/state"),
-          apiFetch("/api/teams"),
-        ]);
-        if (!cancelled) {
-          setState(s);
-          setTeams(t);
-        }
-      } catch {}
+  const send = useCallback((data) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify(data));
+    } else {
+      console.warn("WS not open, message dropped:", data.type);
     }
+  }, []);
 
-    poll();
-    const id = setInterval(poll, interval);
-    return () => { cancelled = true; clearInterval(id); };
-  }, [interval]);
-
-  return { state, teams };
+  return { send, connected };
 }
 
-// ─── HOOK: admin state (writes to backend, local echo for responsiveness) ─────
+// ─── DISPLAY STATE HOOK ───────────────────────────────────────────────────────
+function useDisplayState() {
+  const [state, setState] = useState({
+    screen: "welcome", roundNum: 1, subPhase: "instructions",
+    qIndex: 0, showAnswer: false, timeLeft: 30, timerRunning: false,
+  });
+  const [teams, setTeams] = useState([]);
+  const [wsConnected, setWsConnected] = useState(false);
+
+  const { send, connected } = useWebSocket((msg) => {
+    if (msg.type === "full_state") {
+      setState(msg.state);
+      setTeams(msg.teams);
+    }
+    if (msg.type === "state_update") {
+      setState(prev => ({ ...prev, ...msg.state }));
+    }
+    if (msg.type === "timer_tick") {
+      setState(prev => ({ ...prev, timeLeft: msg.timeLeft }));
+    }
+    if (msg.type === "team_update") {
+      setTeams(prev => prev.map(t => (t._id === msg.team._id ? msg.team : t)));
+    }
+    if (msg.type === "team_added") {
+      setTeams(prev => [...prev, msg.team]);
+    }
+    if (msg.type === "team_removed") {
+      setTeams(prev => prev.filter(t => t._id !== msg.id));
+    }
+    if (msg.type === "teams_reset") {
+      setTeams(msg.teams);
+    }
+  });
+
+  useEffect(() => { setWsConnected(connected); }, [connected]);
+
+  return { state, teams, wsConnected };
+}
+
+// ─── ADMIN STATE HOOK ─────────────────────────────────────────────────────────
 function useAdminState() {
   const [state, setState] = useState({
-    screen: "welcome",
-    roundNum: 1,
-    subPhase: "instructions",
-    qIndex: 0,
-    showAnswer: false,
-    timeLeft: 30,
-    timerRunning: false,
+    screen: "welcome", roundNum: 1, subPhase: "instructions",
+    qIndex: 0, showAnswer: false, timeLeft: 30, timerRunning: false,
   });
   const [teams, setTeams] = useState([]);
-  const [dbStatus, setDbStatus] = useState("idle");
-  const [dbMsg, setDbMsg] = useState("");
-  const timerRef = useRef(null);
-  const timerRunningRef = useRef(false);
+  const [wsConnected, setWsConnected] = useState(false);
 
-  // Fetch initial state and teams
-  const fetchAll = useCallback(async () => {
-    try {
-      setDbStatus("loading");
-      const [s, t] = await Promise.all([
-        apiFetch("/api/state"),
-        apiFetch("/api/teams"),
-      ]);
-      setState(s);
-      setTeams(t);
-      setDbStatus("ok");
-      setDbMsg(`Synced ${t.length} teams from DB`);
-    } catch {
-      setDbStatus("error");
-      setDbMsg("Backend offline");
+  const { send, connected } = useWebSocket((msg) => {
+    if (msg.type === "full_state") {
+      setState(msg.state);
+      setTeams(msg.teams);
     }
-  }, []);
-
-  useEffect(() => { fetchAll(); }, []);
-
-  // Poll teams every 5s
-  useEffect(() => {
-    const id = setInterval(async () => {
-      try { const t = await apiFetch("/api/teams"); setTeams(t); } catch {}
-    }, 5000);
-    return () => clearInterval(id);
-  }, []);
-
-  // Push a state patch to backend and update local echo
-  const patchState = useCallback(async (patch) => {
-    setState(prev => ({ ...prev, ...patch }));
-    try {
-      await apiFetch("/api/state", {
-        method: "PATCH",
-        body: JSON.stringify(patch),
-      });
-    } catch {
-      setDbStatus("error");
-      setDbMsg("State sync failed — check backend");
+    if (msg.type === "state_update") {
+      setState(prev => ({ ...prev, ...msg.state }));
     }
-  }, []);
+    if (msg.type === "timer_tick") {
+      setState(prev => ({ ...prev, timeLeft: msg.timeLeft }));
+    }
+    if (msg.type === "team_update") {
+      setTeams(prev => prev.map(t => (t._id === msg.team._id ? msg.team : t)));
+    }
+    if (msg.type === "team_added") {
+      setTeams(prev => [...prev, msg.team]);
+    }
+    if (msg.type === "team_removed") {
+      setTeams(prev => prev.filter(t => t._id !== msg.id));
+    }
+    if (msg.type === "teams_reset") {
+      setTeams(msg.teams);
+    }
+  });
 
-  // Timer logic — admin device drives server-side timer via timerEndsAt
+  useEffect(() => { setWsConnected(connected); }, [connected]);
+
+  // ── State helpers ────────────────────────────────────────────────────────────
+  const patchState = useCallback((patch) => {
+    setState(prev => ({ ...prev, ...patch })); // optimistic local update
+    send({ type: "patch_state", payload: patch });
+  }, [send]);
+
   const maxTime = useCallback((rn) => (rn === 1 ? 30 : 45), []);
 
   const startTimer = useCallback((roundNum) => {
-    if (timerRunningRef.current) return;
-    timerRunningRef.current = true;
     const duration = maxTime(roundNum);
     const endsAt = Date.now() + duration * 1000;
-
-    // tell the server
     patchState({ timerRunning: true, timerEndsAt: endsAt, timeLeft: duration });
-
-    // local countdown for admin UI
-    setState(prev => ({ ...prev, timeLeft: duration, timerRunning: true }));
-    clearInterval(timerRef.current);
-    timerRef.current = setInterval(() => {
-      setState(prev => {
-        const next = prev.timeLeft - 1;
-        if (next <= 0) {
-          clearInterval(timerRef.current);
-          timerRunningRef.current = false;
-          // no need to patch — server auto-computes from timerEndsAt
-          return { ...prev, timeLeft: 0, timerRunning: false };
-        }
-        return { ...prev, timeLeft: next };
-      });
-    }, 1000);
   }, [patchState, maxTime]);
 
-  const stopTimer = useCallback(() => {
-    clearInterval(timerRef.current);
-    timerRunningRef.current = false;
-    setState(prev => ({ ...prev, timerRunning: false }));
+  const stopTimer = useCallback((roundNum) => {
     patchState({ timerRunning: false, timerEndsAt: 0 });
   }, [patchState]);
 
   const resetTimer = useCallback((roundNum) => {
-    stopTimer();
     const t = maxTime(roundNum);
-    setState(prev => ({ ...prev, timeLeft: t }));
-    patchState({ timeLeft: t, timerRunning: false, timerEndsAt: 0 });
-  }, [stopTimer, maxTime, patchState]);
+    patchState({ timerRunning: false, timerEndsAt: 0, timeLeft: t });
+  }, [patchState, maxTime]);
 
-  // Navigation helpers
   const startRound = useCallback((rn) => {
-    stopTimer();
-    patchState({ screen: "round", roundNum: rn, qIndex: 0, showAnswer: false, subPhase: "instructions", timerRunning: false, timerEndsAt: 0, timeLeft: rn === 1 ? 30 : 45 });
-  }, [patchState, stopTimer]);
+    patchState({
+      screen: "round", roundNum: rn, qIndex: 0, showAnswer: false,
+      subPhase: "instructions", timerRunning: false, timerEndsAt: 0,
+      timeLeft: rn === 1 ? 30 : 45,
+    });
+  }, [patchState]);
 
   const startCountdown = useCallback(() => {
     patchState({ subPhase: "countdown" });
     setTimeout(() => patchState({ subPhase: "question" }), 6000);
   }, [patchState]);
 
-  const nextQ = useCallback((currentQIndex, roundNum, qs) => {
-    if (currentQIndex < qs.length - 1) {
-      const t = maxTime(roundNum);
-      patchState({ qIndex: currentQIndex + 1, showAnswer: false, timeLeft: t, timerRunning: false, timerEndsAt: 0 });
-      stopTimer();
+  const nextQ = useCallback((qIndex, roundNum, qs) => {
+    if (qIndex < qs.length - 1) {
+      patchState({ qIndex: qIndex + 1, showAnswer: false, timeLeft: maxTime(roundNum), timerRunning: false, timerEndsAt: 0 });
     }
-  }, [patchState, stopTimer, maxTime]);
+  }, [patchState, maxTime]);
 
-  const prevQ = useCallback((currentQIndex, roundNum) => {
-    if (currentQIndex > 0) {
-      const t = maxTime(roundNum);
-      patchState({ qIndex: currentQIndex - 1, showAnswer: false, timeLeft: t, timerRunning: false, timerEndsAt: 0 });
-      stopTimer();
+  const prevQ = useCallback((qIndex, roundNum) => {
+    if (qIndex > 0) {
+      patchState({ qIndex: qIndex - 1, showAnswer: false, timeLeft: maxTime(roundNum), timerRunning: false, timerEndsAt: 0 });
     }
-  }, [patchState, stopTimer, maxTime]);
+  }, [patchState, maxTime]);
 
-  // Team operations
-  const addTeam = useCallback(async (name) => {
-    if (!name.trim()) return;
-    try {
-      const team = await apiFetch("/api/teams", { method: "POST", body: JSON.stringify({ name: name.trim() }) });
-      setTeams(prev => [...prev, team]);
-    } catch {
-      setTeams(prev => [...prev, { id: Date.now(), name: name.trim(), r1: 0, r2: 0, r3: 0 }]);
-    }
-  }, []);
+  // ── Team helpers ─────────────────────────────────────────────────────────────
+  const addTeam = useCallback((name) => {
+    send({ type: "add_team", payload: { name } });
+  }, [send]);
 
-  const removeTeam = useCallback(async (t) => {
+  const removeTeam = useCallback((t) => {
     const id = t._id || t.id;
-    try { await apiFetch(`/api/teams/${id}`, { method: "DELETE" }); } catch {}
-    setTeams(prev => prev.filter(x => (x._id || x.id) !== id));
-  }, []);
+    send({ type: "remove_team", payload: { id } });
+  }, [send]);
 
-  const updateScore = useCallback(async (t, round, delta) => {
+  const updateScore = useCallback((t, round, delta) => {
     const id = t._id || t.id;
-    const nv = Math.max(0, (t[round] || 0) + delta);
-    setTeams(prev => prev.map(x => (x._id || x.id) === id ? { ...x, [round]: nv } : x));
-    try { await apiFetch(`/api/teams/${id}`, { method: "PATCH", body: JSON.stringify({ [round]: nv }) }); } catch {}
-  }, []);
+    const newVal = Math.max(0, (t[round] || 0) + delta);
+    setTeams(prev => prev.map(x => (x._id || x.id) === id ? { ...x, [round]: newVal } : x));
+    send({ type: "patch_team", payload: { id, round, value: newVal } });
+  }, [send]);
 
-  const setScore = useCallback(async (t, round, val) => {
+  const setScore = useCallback((t, round, val) => {
     const id = t._id || t.id;
     const n = Math.max(0, parseInt(val) || 0);
     setTeams(prev => prev.map(x => (x._id || x.id) === id ? { ...x, [round]: n } : x));
-    try { await apiFetch(`/api/teams/${id}`, { method: "PATCH", body: JSON.stringify({ [round]: n }) }); } catch {}
-  }, []);
+    send({ type: "patch_team", payload: { id, round, value: n } });
+  }, [send]);
 
-  const resetAllScores = useCallback(async () => {
+  const resetAllScores = useCallback(() => {
     if (!window.confirm("Reset ALL scores to 0?")) return;
-    for (const t of teams) {
-      try { await apiFetch(`/api/teams/${t._id || t.id}`, { method: "PATCH", body: JSON.stringify({ r1: 0, r2: 0, r3: 0 }) }); } catch {}
-    }
-    setTeams(prev => prev.map(t => ({ ...t, r1: 0, r2: 0, r3: 0 })));
-  }, [teams]);
+    send({ type: "reset_scores" });
+  }, [send]);
 
   return {
-    state, teams, dbStatus, dbMsg,
-    patchState, fetchAll,
-    startRound, startCountdown, nextQ, prevQ,
+    state, teams, wsConnected,
+    patchState, startRound, startCountdown, nextQ, prevQ,
     startTimer, stopTimer, resetTimer, maxTime,
     addTeam, removeTeam, updateScore, setScore, resetAllScores,
   };
@@ -271,7 +274,8 @@ function GlowButton({ children, onClick, color = "#00d4aa", size = "md", style =
   const pad = size === "sm" ? "8px 16px" : size === "lg" ? "14px 32px" : "10px 22px";
   const fs = size === "sm" ? 11 : size === "lg" ? 16 : 13;
   return (
-    <button onClick={onClick} disabled={disabled} style={{ padding: pad, fontFamily: "'Orbitron', monospace", fontSize: fs, fontWeight: 700, letterSpacing: 2, cursor: disabled ? "default" : "pointer", borderRadius: 8, border: `1px solid ${disabled ? "rgba(255,255,255,0.1)" : color + "55"}`, background: disabled ? "rgba(255,255,255,0.04)" : `${color}15`, color: disabled ? "rgba(255,255,255,0.25)" : color, transition: "all 0.2s", ...style }}
+    <button onClick={onClick} disabled={disabled}
+      style={{ padding: pad, fontFamily: "'Orbitron', monospace", fontSize: fs, fontWeight: 700, letterSpacing: 2, cursor: disabled ? "default" : "pointer", borderRadius: 8, border: `1px solid ${disabled ? "rgba(255,255,255,0.1)" : color + "55"}`, background: disabled ? "rgba(255,255,255,0.04)" : `${color}15`, color: disabled ? "rgba(255,255,255,0.25)" : color, transition: "all 0.2s", ...style }}
       onMouseEnter={e => { if (!disabled) { e.currentTarget.style.background = `${color}30`; e.currentTarget.style.boxShadow = `0 0 20px ${color}40`; } }}
       onMouseLeave={e => { e.currentTarget.style.background = disabled ? "rgba(255,255,255,0.04)" : `${color}15`; e.currentTarget.style.boxShadow = "none"; }}
     >{children}</button>
@@ -301,12 +305,18 @@ function CornerAccents({ color = "rgba(0,212,170,0.5)" }) {
   </>;
 }
 
+function WsIndicator({ connected }) {
+  return (
+    <div style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "4px 10px", borderRadius: 6, background: connected ? "rgba(0,212,170,0.1)" : "rgba(255,80,80,0.1)", border: `1px solid ${connected ? "rgba(0,212,170,0.35)" : "rgba(255,80,80,0.35)"}`, fontSize: 10, letterSpacing: 1.5, color: connected ? "#00d4aa" : "#ff5050", fontFamily: "'Orbitron', monospace" }}>
+      <span style={{ width: 6, height: 6, borderRadius: "50%", background: connected ? "#00d4aa" : "#ff5050", boxShadow: connected ? "0 0 6px #00d4aa" : "none", display: "inline-block", animation: connected ? "wsPulse 2s ease-in-out infinite" : "none" }} />
+      {connected ? "WS LIVE" : "RECONNECTING…"}
+    </div>
+  );
+}
+
 function SponsorTicker() {
   const [offset, setOffset] = useState(0);
-  useEffect(() => {
-    const id = setInterval(() => setOffset(o => (o + 0.5) % (SPONSORS.length * 200)), 16);
-    return () => clearInterval(id);
-  }, []);
+  useEffect(() => { const id = setInterval(() => setOffset(o => (o + 0.5) % (SPONSORS.length * 200)), 16); return () => clearInterval(id); }, []);
   const items = [...SPONSORS, ...SPONSORS, ...SPONSORS];
   return (
     <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, zIndex: 10, height: 44, background: "rgba(0,0,0,0.55)", borderTop: "1px solid rgba(0,212,170,0.12)", backdropFilter: "blur(8px)", overflow: "hidden", display: "flex", alignItems: "center" }}>
@@ -346,7 +356,8 @@ function SponsorColumn({ sponsors, reverse }) {
   );
 }
 
-// ─── WELCOME SCREEN ───────────────────────────────────────────────────────────
+// ─── SCREENS (unchanged visually) ────────────────────────────────────────────
+
 function WelcomeScreen() {
   const EVENT_TIME = new Date("2026-03-28T11:30:00").getTime();
   const [timeLeft, setTimeLeft] = useState({});
@@ -413,7 +424,6 @@ function WelcomeScreen() {
   );
 }
 
-// ─── ROUND INSTRUCTIONS ───────────────────────────────────────────────────────
 function RoundInstructions({ roundNum }) {
   const rules = {
     1: ["30 seconds per question", "Fastest finger format — raise hand to answer", "No negative marking", "8 questions total", "Correct answer = 10 points"],
@@ -448,7 +458,6 @@ function RoundInstructions({ roundNum }) {
   );
 }
 
-// ─── COUNTDOWN SCREEN ─────────────────────────────────────────────────────────
 function CountdownScreen() {
   const [count, setCount] = useState(5);
   useEffect(() => { const id = setInterval(() => setCount(c => Math.max(0, c - 1)), 1000); return () => clearInterval(id); }, []);
@@ -466,7 +475,6 @@ function CountdownScreen() {
   );
 }
 
-// ─── ROUND 3 CASE COMPETITION SCREEN ─────────────────────────────────────────
 function Round3CaseScreen({ teams }) {
   const PREP_SECS = 20 * 60;
   const [elapsed, setElapsed] = useState(0);
@@ -511,7 +519,6 @@ function Round3CaseScreen({ teams }) {
         <div style={{ width: "52%", padding: "24px 32px 56px", borderRight: "1px solid rgba(255,107,53,0.15)", overflowY: "auto" }}>
           <div style={{ fontSize: 11, letterSpacing: 4, color: "rgba(255,107,53,0.7)", textTransform: "uppercase", marginBottom: 16 }}>CASE BRIEF</div>
           <div style={{ background: "rgba(255,107,53,0.05)", border: "1px solid rgba(255,107,53,0.2)", borderRadius: 14, padding: "20px 24px", marginBottom: 24 }}>
-            <div style={{ fontSize: 10, letterSpacing: 3, color: "rgba(255,255,255,0.3)", marginBottom: 8 }}>SCENARIO</div>
             <div style={{ fontFamily: "'Orbitron', monospace", fontSize: 16, fontWeight: 700, color: "#fff", lineHeight: 1.4, marginBottom: 12 }}>Case study distributed to all teams</div>
             <div style={{ fontSize: 14, color: "rgba(255,255,255,0.5)", lineHeight: 1.7 }}>Read carefully, identify the core industrial engineering problem, and build a structured, data-backed solution. Use IE tools — lean, Six Sigma, process mapping — wherever applicable.</div>
           </div>
@@ -522,9 +529,7 @@ function Round3CaseScreen({ teams }) {
                 <span style={{ fontFamily: "'Orbitron', monospace", fontSize: 13, color: "#ff6b35", fontWeight: 700 }}>{cr.pct}%</span>
               </div>
               <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", marginBottom: 5 }}>{cr.desc}</div>
-              <div style={{ height: 3, background: "rgba(255,255,255,0.06)", borderRadius: 2 }}>
-                <div style={{ height: "100%", width: `${cr.pct * 3.33}%`, background: "rgba(255,107,53,0.55)", borderRadius: 2 }} />
-              </div>
+              <div style={{ height: 3, background: "rgba(255,255,255,0.06)", borderRadius: 2 }}><div style={{ height: "100%", width: `${cr.pct * 3.33}%`, background: "rgba(255,107,53,0.55)", borderRadius: 2 }} /></div>
             </div>
           ))}
         </div>
@@ -540,9 +545,7 @@ function Round3CaseScreen({ teams }) {
                   <span style={{ fontSize: 15, fontWeight: 700, color: "#fff", flex: 1 }}>{t.name}</span>
                   <span style={{ fontFamily: "'Orbitron', monospace", fontSize: 22, fontWeight: 900, color: c }}>{total}</span>
                 </div>
-                <div style={{ height: 4, background: "rgba(255,255,255,0.06)", borderRadius: 2 }}>
-                  <div style={{ height: "100%", width: `${(total / maxScore) * 100}%`, background: c, borderRadius: 2 }} />
-                </div>
+                <div style={{ height: 4, background: "rgba(255,255,255,0.06)", borderRadius: 2 }}><div style={{ height: "100%", width: `${(total / maxScore) * 100}%`, background: c, borderRadius: 2 }} /></div>
               </div>
             );
           })}
@@ -554,7 +557,6 @@ function Round3CaseScreen({ teams }) {
   );
 }
 
-// ─── LEADERBOARD SIDEBAR ──────────────────────────────────────────────────────
 function LeaderboardSidebar({ teams }) {
   const sorted = [...teams].sort((a, b) => (b.r1 + b.r2 + b.r3) - (a.r1 + a.r2 + a.r3));
   const podiumColors = ["#FFD700", "#C0C0C0", "#CD7F32", "#4a9eff", "#a855f7", "#ff6b35", "#22d3ee"];
@@ -577,9 +579,7 @@ function LeaderboardSidebar({ teams }) {
                 <span style={{ fontSize: 13, fontWeight: 700, color: "#fff", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.name}</span>
                 <span style={{ fontFamily: "'Orbitron', monospace", fontSize: 17, fontWeight: 900, color: rankColor }}>{total}</span>
               </div>
-              <div style={{ height: 3, background: "rgba(255,255,255,0.06)", borderRadius: 2 }}>
-                <div style={{ height: "100%", width: `${(total / max) * 100}%`, background: rankColor, borderRadius: 2, transition: "width 0.8s" }} />
-              </div>
+              <div style={{ height: 3, background: "rgba(255,255,255,0.06)", borderRadius: 2 }}><div style={{ height: "100%", width: `${(total / max) * 100}%`, background: rankColor, borderRadius: 2, transition: "width 0.8s" }} /></div>
               <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
                 {[["R1", t.r1, "#00d4aa"], ["R2", t.r2, "#4a9eff"], ["R3", t.r3, "#ff6b35"]].map(([lbl, sc, c]) => (
                   <span key={lbl} style={{ fontSize: 10, color: "rgba(255,255,255,0.3)" }}><span style={{ color: c }}>{lbl}</span>:{sc}</span>
@@ -593,7 +593,6 @@ function LeaderboardSidebar({ teams }) {
   );
 }
 
-// ─── QUESTION SCREEN ──────────────────────────────────────────────────────────
 function QuestionScreen({ roundNum, qIndex, showAnswer, timeLeft, teams }) {
   const qs = QUESTIONS[`round${roundNum}`] || [];
   const q = qs[qIndex];
@@ -647,7 +646,6 @@ function QuestionScreen({ roundNum, qIndex, showAnswer, timeLeft, teams }) {
   );
 }
 
-// ─── SCOREBOARD ───────────────────────────────────────────────────────────────
 function ScoreboardScreen({ teams }) {
   const sorted = [...teams].sort((a, b) => (b.r1 + b.r2 + b.r3) - (a.r1 + a.r2 + a.r3));
   const podiumColors = ["#FFD700", "#C0C0C0", "#CD7F32"];
@@ -686,27 +684,32 @@ function ScoreboardScreen({ teams }) {
   );
 }
 
-// ─── DISPLAY APP — reads from backend ────────────────────────────────────────
+// ─── DISPLAY APP ──────────────────────────────────────────────────────────────
 function DisplayApp() {
-  const { state, teams } = useRemoteState(1000);
+  const { state, teams, wsConnected } = useDisplayState();
   const { screen, roundNum, subPhase, qIndex, showAnswer, timeLeft } = state;
 
-  if (screen === "scoreboard") return <ScoreboardScreen teams={teams} />;
-  if (screen === "round") {
-    if (subPhase === "instructions") return <RoundInstructions roundNum={roundNum} />;
-    if (subPhase === "countdown") return <CountdownScreen />;
-    if (roundNum === 3 && subPhase === "casecomp") return <Round3CaseScreen teams={teams} />;
-    if (subPhase === "question") return <QuestionScreen roundNum={roundNum} qIndex={qIndex} showAnswer={showAnswer} timeLeft={timeLeft} teams={teams} />;
-  }
-  return <WelcomeScreen />;
+  return (
+    <>
+      {/* WS status dot in corner */}
+      <div style={{ position: "fixed", top: 10, right: 10, zIndex: 9999 }}>
+        <div style={{ width: 8, height: 8, borderRadius: "50%", background: wsConnected ? "#00d4aa" : "#ff5050", boxShadow: wsConnected ? "0 0 8px #00d4aa" : "none" }} />
+      </div>
+      {screen === "scoreboard" && <ScoreboardScreen teams={teams} />}
+      {screen === "round" && subPhase === "instructions" && <RoundInstructions roundNum={roundNum} />}
+      {screen === "round" && subPhase === "countdown" && <CountdownScreen />}
+      {screen === "round" && roundNum === 3 && subPhase === "casecomp" && <Round3CaseScreen teams={teams} />}
+      {screen === "round" && subPhase === "question" && <QuestionScreen roundNum={roundNum} qIndex={qIndex} showAnswer={showAnswer} timeLeft={timeLeft} teams={teams} />}
+      {screen === "welcome" && <WelcomeScreen />}
+    </>
+  );
 }
 
 // ─── ADMIN APP ────────────────────────────────────────────────────────────────
 function AdminApp() {
   const {
-    state, teams, dbStatus, dbMsg,
-    patchState, fetchAll,
-    startRound, startCountdown, nextQ, prevQ,
+    state, teams, wsConnected,
+    patchState, startRound, startCountdown, nextQ, prevQ,
     startTimer, stopTimer, resetTimer, maxTime,
     addTeam, removeTeam, updateScore, setScore, resetAllScores,
   } = useAdminState();
@@ -720,7 +723,6 @@ function AdminApp() {
   const currentQ = qs[qIndex];
 
   const tabStyle = t => ({ padding: "10px 24px", fontFamily: "'Orbitron', monospace", fontSize: 11, letterSpacing: 2, cursor: "pointer", border: "none", borderRadius: 8, background: tab === t ? "#00d4aa" : "rgba(0,212,170,0.08)", color: tab === t ? "#000" : "#00d4aa", fontWeight: 700, transition: "all 0.2s" });
-
   const inBtn = (label, onClick, color = "#00d4aa", disabled = false) => (
     <button onClick={onClick} disabled={disabled} style={{ padding: "8px 14px", fontFamily: "'Orbitron', monospace", fontSize: 10, letterSpacing: 1.5, cursor: disabled ? "default" : "pointer", borderRadius: 6, border: `1px solid ${disabled ? "rgba(255,255,255,0.1)" : color + "55"}`, background: disabled ? "rgba(255,255,255,0.03)" : `${color}15`, color: disabled ? "rgba(255,255,255,0.25)" : color, fontWeight: 700, whiteSpace: "nowrap" }}>{label}</button>
   );
@@ -729,35 +731,27 @@ function AdminApp() {
     <div style={{ minHeight: "100vh", background: "#020f0d", color: "#fff", fontFamily: "'Rajdhani', sans-serif" }}>
       <GridBg />
       {/* Header */}
-      <div style={{ position: "relative", zIndex: 3, padding: "18px 32px", borderBottom: "1px solid rgba(0,212,170,0.1)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+      <div style={{ position: "relative", zIndex: 3, padding: "18px 32px", borderBottom: "1px solid rgba(0,212,170,0.1)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <div>
           <div style={{ fontFamily: "'Orbitron', monospace", fontSize: 20, fontWeight: 900, color: "#00d4aa", letterSpacing: 2 }}>⚙ ADMIN PANEL</div>
           <div style={{ fontSize: 11, letterSpacing: 3, color: "rgba(255,255,255,0.3)", marginTop: 2 }}>OPTIRELAY 2026 · NIT JALANDHAR</div>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          {/* DB status */}
-          <div style={{ padding: "4px 10px", borderRadius: 6, background: dbStatus === "ok" ? "rgba(0,212,170,0.1)" : dbStatus === "error" ? "rgba(255,80,80,0.1)" : "rgba(255,255,255,0.04)", border: `1px solid ${dbStatus === "ok" ? "rgba(0,212,170,0.3)" : dbStatus === "error" ? "rgba(255,80,80,0.3)" : "rgba(255,255,255,0.1)"}`, fontSize: 10, letterSpacing: 1.5, color: dbStatus === "ok" ? "#00d4aa" : dbStatus === "error" ? "#ff5050" : "rgba(255,255,255,0.3)" }}>
-            {dbStatus === "ok" ? "● DB OK" : dbStatus === "error" ? "● DB OFFLINE" : "● CONNECTING"}
-          </div>
-          <button onClick={fetchAll} style={{ padding: "4px 10px", borderRadius: 6, background: "rgba(0,212,170,0.08)", border: "1px solid rgba(0,212,170,0.2)", color: "#00d4aa", fontSize: 10, cursor: "pointer", fontFamily: "'Orbitron', monospace" }}>↺ SYNC</button>
-          {/* Current screen badge */}
+          <WsIndicator connected={wsConnected} />
           <div style={{ padding: "5px 12px", borderRadius: 6, background: "rgba(0,212,170,0.08)", border: "1px solid rgba(0,212,170,0.2)", fontSize: 10, letterSpacing: 2, color: "#00d4aa" }}>
-            {screen.toUpperCase()} {screen === "round" ? `→ R${roundNum} ${subPhase.toUpperCase()}` : ""}
-          </div>
-          {/* Sync indicator */}
-          <div style={{ padding: "4px 10px", borderRadius: 6, background: "rgba(74,158,255,0.1)", border: "1px solid rgba(74,158,255,0.3)", fontSize: 10, letterSpacing: 1.5, color: "#4a9eff" }}>
-            ⟳ LIVE SYNC
+            {screen.toUpperCase()}{screen === "round" ? ` → R${roundNum} ${subPhase.toUpperCase()}` : ""}
           </div>
         </div>
       </div>
 
+      {/* Tabs */}
       <div style={{ position: "relative", zIndex: 3, padding: "14px 32px 6px", display: "flex", gap: 8 }}>
         {["control", "teams", "scoring"].map(t => <button key={t} style={tabStyle(t)} onClick={() => setTab(t)}>{t.toUpperCase()}</button>)}
       </div>
 
       <div style={{ position: "relative", zIndex: 3, padding: "14px 32px 32px", display: "flex", flexDirection: "column", gap: 14 }}>
 
-        {/* ── CONTROL TAB ── */}
+        {/* ── CONTROL ── */}
         {tab === "control" && <>
           <div style={{ background: "rgba(0,212,170,0.04)", border: "1px solid rgba(0,212,170,0.15)", borderRadius: 14, padding: 22 }}>
             <div style={{ fontSize: 11, letterSpacing: 4, color: "rgba(0,212,170,0.7)", textTransform: "uppercase", marginBottom: 14 }}>SCREEN NAVIGATION</div>
@@ -779,7 +773,7 @@ function AdminApp() {
                 <>
                   <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
                     {inBtn("SHOW INSTRUCTIONS", () => patchState({ subPhase: "instructions" }), rc)}
-                    {inBtn("COUNTDOWN → QUESTIONS", () => startCountdown(), rc, subPhase === "countdown")}
+                    {inBtn("COUNTDOWN → QUESTIONS", startCountdown, rc, subPhase === "countdown")}
                     {inBtn("JUMP TO QUESTIONS", () => patchState({ subPhase: "question" }), rc)}
                   </div>
                   {subPhase === "question" && <>
@@ -814,16 +808,17 @@ function AdminApp() {
           )}
         </>}
 
-        {/* ── TEAMS TAB ── */}
+        {/* ── TEAMS ── */}
         {tab === "teams" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <div style={{ background: "rgba(0,212,170,0.04)", border: "1px solid rgba(0,212,170,0.15)", borderRadius: 14, padding: 22 }}>
               <div style={{ fontSize: 11, letterSpacing: 4, color: "rgba(0,212,170,0.7)", textTransform: "uppercase", marginBottom: 14 }}>ADD TEAM</div>
               <div style={{ display: "flex", gap: 10 }}>
-                <input value={newTeamName} onChange={e => setNewTeamName(e.target.value)} onKeyDown={e => e.key === "Enter" && addTeam(newTeamName).then(() => setNewTeamName(""))} placeholder="Team name..." style={{ flex: 1, padding: "10px 14px", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, color: "#fff", fontSize: 14, outline: "none", fontFamily: "'Rajdhani', sans-serif" }} />
-                <GlowButton onClick={() => addTeam(newTeamName).then(() => setNewTeamName(""))}>+ ADD</GlowButton>
+                <input value={newTeamName} onChange={e => setNewTeamName(e.target.value)}
+                  onKeyDown={e => { if (e.key === "Enter" && newTeamName.trim()) { addTeam(newTeamName); setNewTeamName(""); } }}
+                  placeholder="Team name..." style={{ flex: 1, padding: "10px 14px", background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, color: "#fff", fontSize: 14, outline: "none", fontFamily: "'Rajdhani', sans-serif" }} />
+                <GlowButton onClick={() => { if (newTeamName.trim()) { addTeam(newTeamName); setNewTeamName(""); } }}>+ ADD</GlowButton>
               </div>
-              {dbMsg && <div style={{ marginTop: 8, fontSize: 11, color: dbStatus === "ok" ? "rgba(0,212,170,0.6)" : "rgba(255,100,100,0.6)", letterSpacing: 1 }}>{dbMsg}</div>}
             </div>
             <div style={{ background: "rgba(0,212,170,0.04)", border: "1px solid rgba(0,212,170,0.15)", borderRadius: 14, padding: 22 }}>
               <div style={{ fontSize: 11, letterSpacing: 4, color: "rgba(0,212,170,0.7)", textTransform: "uppercase", marginBottom: 14 }}>TEAMS ({teams.length})</div>
@@ -843,7 +838,7 @@ function AdminApp() {
           </div>
         )}
 
-        {/* ── SCORING TAB ── */}
+        {/* ── SCORING ── */}
         {tab === "scoring" && (
           teams.length === 0
             ? <div style={{ textAlign: "center", padding: 60, color: "rgba(255,255,255,0.3)", fontSize: 16, letterSpacing: 2 }}>No teams. Add in TEAMS tab.</div>
@@ -871,6 +866,7 @@ function AdminApp() {
                     );
                   })}
                 </div>
+                {/* Live standings preview */}
                 <div style={{ background: "rgba(0,212,170,0.04)", border: "1px solid rgba(0,212,170,0.15)", borderRadius: 14, padding: 22 }}>
                   <div style={{ fontSize: 11, letterSpacing: 4, color: "rgba(0,212,170,0.7)", textTransform: "uppercase", marginBottom: 14 }}>LIVE STANDINGS</div>
                   {[...teams].sort((a, b) => (b.r1 + b.r2 + b.r3) - (a.r1 + a.r2 + a.r3)).map((t, i) => {
@@ -896,6 +892,7 @@ function AdminApp() {
         @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@400;500;600;700&display=swap');
         @keyframes countPop{0%{transform:scale(1.4);opacity:0}100%{transform:scale(1);opacity:1}}
         @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}
+        @keyframes wsPulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:0.6;transform:scale(1.3)}}
         *{box-sizing:border-box}
         input[type=number]::-webkit-inner-spin-button{opacity:1}
       `}</style>
@@ -903,7 +900,7 @@ function AdminApp() {
   );
 }
 
-// ─── ADMIN LOGIN GATE ─────────────────────────────────────────────────────────
+// ─── ADMIN LOGIN ──────────────────────────────────────────────────────────────
 function AdminGate() {
   const [authed, setAuthed] = useState(false);
   const [pw, setPw] = useState("");
@@ -917,10 +914,9 @@ function AdminGate() {
       const res = await fetch(`${API}/admin-login`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: pw }) });
       const data = await res.json();
       if (data.success) setAuthed(true);
-      else { setError("Incorrect password. Try again."); setPw(""); }
-    } catch {
-      setError("Cannot reach server. Is the backend running?");
-    } finally { setLoading(false); }
+      else { setError("Incorrect password."); setPw(""); }
+    } catch { setError("Cannot reach server."); }
+    finally { setLoading(false); }
   };
 
   if (authed) return <AdminApp />;
@@ -934,9 +930,11 @@ function AdminGate() {
         <div style={{ width: 60, height: 2, background: "linear-gradient(90deg, transparent, #00d4aa, transparent)", marginBottom: 32 }} />
         <div style={{ width: "100%", background: "rgba(0,212,170,0.04)", border: "1px solid rgba(0,212,170,0.2)", borderRadius: 16, padding: 28, display: "flex", flexDirection: "column", gap: 14 }}>
           <div style={{ fontSize: 11, letterSpacing: 3, color: "rgba(255,255,255,0.3)", textTransform: "uppercase" }}>Enter Password</div>
-          <input type="password" placeholder="••••••••••••" value={pw} autoFocus onChange={e => { setPw(e.target.value); setError(""); }} onKeyDown={e => e.key === "Enter" && handleLogin()} style={{ padding: "12px 16px", borderRadius: 8, border: `1px solid ${error ? "rgba(255,80,80,0.5)" : "rgba(0,212,170,0.3)"}`, background: "rgba(255,255,255,0.04)", color: "#fff", outline: "none", fontFamily: "'Orbitron', monospace", fontSize: 16, letterSpacing: 4, width: "100%", boxSizing: "border-box" }} />
+          <input type="password" placeholder="••••••••••••" value={pw} autoFocus onChange={e => { setPw(e.target.value); setError(""); }} onKeyDown={e => e.key === "Enter" && handleLogin()}
+            style={{ padding: "12px 16px", borderRadius: 8, border: `1px solid ${error ? "rgba(255,80,80,0.5)" : "rgba(0,212,170,0.3)"}`, background: "rgba(255,255,255,0.04)", color: "#fff", outline: "none", fontFamily: "'Orbitron', monospace", fontSize: 16, letterSpacing: 4, width: "100%", boxSizing: "border-box" }} />
           {error && <div style={{ fontSize: 11, color: "#ff5050", letterSpacing: 1, marginTop: -6 }}>⚠ {error}</div>}
-          <button onClick={handleLogin} disabled={loading} style={{ padding: "12px", background: loading ? "rgba(0,212,170,0.3)" : "#00d4aa", border: "none", borderRadius: 8, cursor: loading ? "default" : "pointer", fontWeight: 900, color: "#000", fontFamily: "'Orbitron', monospace", fontSize: 13, letterSpacing: 3 }}
+          <button onClick={handleLogin} disabled={loading}
+            style={{ padding: "12px", background: loading ? "rgba(0,212,170,0.3)" : "#00d4aa", border: "none", borderRadius: 8, cursor: loading ? "default" : "pointer", fontWeight: 900, color: "#000", fontFamily: "'Orbitron', monospace", fontSize: 13, letterSpacing: 3 }}
             onMouseEnter={e => { if (!loading) e.currentTarget.style.background = "#00ffcc"; }}
             onMouseLeave={e => { if (!loading) e.currentTarget.style.background = "#00d4aa"; }}
           >{loading ? "VERIFYING…" : "UNLOCK"}</button>
@@ -947,6 +945,7 @@ function AdminGate() {
   );
 }
 
+// ─── ROOT ─────────────────────────────────────────────────────────────────────
 export default function App() {
   const isAdmin = typeof window !== "undefined" && window.location.search.includes("admin");
   return isAdmin ? <AdminGate /> : <DisplayApp />;
