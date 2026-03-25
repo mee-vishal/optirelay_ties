@@ -8,7 +8,6 @@ const app = express();
 
 // ─── CORS CONFIG ──────────────────────────────────────────────────────────────
 const allowedOrigins = [
-  "http://localhost:5173", // local dev (Vite)
   "https://optirelay.netlify.app", // your deployed frontend
 ];
 
