@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
 const API = "https://optirelay-ties.onrender.com";
+// const API = "http://localhost:5000";
 // Convert https → wss automatically
 const WS_URL = API.replace(/^https/, "wss").replace(/^http/, "ws");
 
@@ -37,11 +38,16 @@ const QUOTES = [
 ];
 
 const SPONSORS = [
-  { id: 1, name: "ProHawke", color: "#00d4aa", letter: "PH" },
-  { id: 2, name: "NIT Jalandhar", color: "#4a9eff", letter: "NIT" },
-  { id: 3, name: "IES", color: "#ff6b35", letter: "IES" },
-  { id: 4, name: "TechCorp", color: "#a855f7", letter: "TC" },
-  { id: 5, name: "IndustrialX", color: "#22d3ee", letter: "IX" },
+  { id: 1, name: "ProHawke", color: "#00d4aa", logo: "/logos/image.png" },
+  { id: 2, name: "COLDOP", color: "#4a9eff", logo: "/logos/coldop.jpeg" },
+
+];
+
+const SLIDE_IMAGES = [
+  "/logos/1.png",
+  "/logos/2.png",
+  "/logos/3.png",
+  "/logos/4.png",
 ];
 
 // ─── WEBSOCKET HOOK ───────────────────────────────────────────────────────────
@@ -295,6 +301,44 @@ function GridBg() {
   );
 }
 
+
+function HeaderLogos() {
+  // Use your local paths or hosted URLs here
+  const nitjLogo = "/logos/nitj.png"; 
+  const tiesLogo = "/logos/ties.jpeg";
+
+  return (
+    <div
+      style={{
+        position: "absolute",
+        top: 0,
+        left: 0,
+        right: 0,
+        zIndex: 20,
+        padding: "20px 180px",
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        pointerEvents: "none", // Allows clicking things behind the logos if needed
+      }}
+    >
+      {/* NIT Jalandhar Logo */}
+      <img 
+        src={nitjLogo} 
+        alt="NIT Jalandhar" 
+        style={{ height: "100px", width: "auto", objectFit: "contain" }} 
+      />
+
+      {/* TIES Logo */}
+      <img 
+        src={tiesLogo} 
+        alt="TIES" 
+        style={{ height: "100px", width: "auto", objectFit: "contain" }} 
+      />
+    </div>
+  );
+}
+
 function CornerAccents({ color = "rgba(0,212,170,0.5)" }) {
   const s = { position: "absolute", zIndex: 4, width: 24, height: 24 };
   return <>
@@ -314,41 +358,211 @@ function WsIndicator({ connected }) {
   );
 }
 
-function SponsorTicker() {
+export function SponsorTicker() {
   const [offset, setOffset] = useState(0);
-  useEffect(() => { const id = setInterval(() => setOffset(o => (o + 0.5) % (SPONSORS.length * 200)), 16); return () => clearInterval(id); }, []);
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      setOffset((o) => (o + 0.6) % (SPONSORS.length * 260));
+    }, 16);
+    return () => clearInterval(id);
+  }, []);
+
   const items = [...SPONSORS, ...SPONSORS, ...SPONSORS];
+
   return (
-    <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, zIndex: 10, height: 44, background: "rgba(0,0,0,0.55)", borderTop: "1px solid rgba(0,212,170,0.12)", backdropFilter: "blur(8px)", overflow: "hidden", display: "flex", alignItems: "center" }}>
-      <div style={{ flexShrink: 0, padding: "0 16px 0 14px", fontFamily: "'Orbitron', monospace", fontSize: 9, letterSpacing: 3, color: "rgba(0,212,170,0.5)", borderRight: "1px solid rgba(0,212,170,0.15)", whiteSpace: "nowrap" }}>SPONSORS</div>
+    <div
+      style={{
+        position: "absolute",
+        bottom: 0,
+        left: 0,
+        right: 0,
+        zIndex: 10,
+        height: 60, // 🔥 increased height
+        background: "rgba(0,0,0,0.6)",
+        borderTop: "1px solid rgba(0,212,170,0.12)",
+        backdropFilter: "blur(10px)",
+        overflow: "hidden",
+        display: "flex",
+        alignItems: "center",
+      }}
+    >
+      {/* LEFT LABEL */}
+      <div
+        style={{
+          flexShrink: 0,
+          padding: "0 18px",
+          fontFamily: "'Orbitron', monospace",
+          fontSize: 10,
+          letterSpacing: 3,
+          color: "rgba(0,212,170,0.6)",
+          borderRight: "1px solid rgba(0,212,170,0.15)",
+        }}
+      >
+        SPONSORS
+      </div>
+
+      {/* SCROLL AREA */}
       <div style={{ flex: 1, overflow: "hidden" }}>
-        <div style={{ display: "flex", transform: `translateX(-${offset}px)`, whiteSpace: "nowrap" }}>
+        <div
+          style={{
+            display: "flex",
+            transform: `translateX(-${offset}px)`,
+            whiteSpace: "nowrap",
+          }}
+        >
           {items.map((s, i) => (
-            <div key={i} style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "0 32px", borderRight: "1px solid rgba(255,255,255,0.04)" }}>
-              <div style={{ width: 22, height: 22, borderRadius: 5, background: `${s.color}20`, border: `1px solid ${s.color}44`, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Orbitron', monospace", fontSize: 8, fontWeight: 700, color: s.color }}>{s.letter}</div>
-              <span style={{ fontFamily: "'Rajdhani', sans-serif", fontSize: 12, letterSpacing: 2, color: "rgba(255,255,255,0.4)" }}>{s.name.toUpperCase()}</span>
+            <div
+              key={i}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 16,
+                padding: "0 50px",
+                borderRight: "1px solid rgba(255,255,255,0.05)",
+              }}
+            >
+              {/* LOGO BOX */}
+              <div
+                style={{
+                  width: 48,
+                  height: 48,
+                  borderRadius: 8,
+                  background: `${s.color}20`,
+                  border: `1px solid ${s.color}55`,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  overflow: "hidden",
+                }}
+              >
+                <img
+                  src={s.logo}
+                  alt={s.name}
+                  style={{
+                    maxWidth: "80%",
+                    maxHeight: "80%",
+                    objectFit: "contain",
+                    filter: "brightness(1.2)",
+                  }}
+                  onError={(e) => {
+                    e.target.style.display = "none";
+                  }}
+                />
+              </div>
+
+              {/* NAME */}
+              <span
+                style={{
+                  fontFamily: "'Rajdhani', sans-serif",
+                  fontSize: 14,
+                  letterSpacing: 2,
+                  color: "rgba(255,255,255,0.6)",
+                }}
+              >
+                {s.name.toUpperCase()}
+              </span>
             </div>
           ))}
         </div>
       </div>
-      <div style={{ flexShrink: 0, padding: "0 14px", fontFamily: "'Orbitron', monospace", fontSize: 9, letterSpacing: 2, color: "rgba(0,212,170,0.4)", borderLeft: "1px solid rgba(0,212,170,0.15)" }}>PROHAWKE</div>
+
+      {/* RIGHT LABEL */}
+      <div
+        style={{
+          flexShrink: 0,
+          padding: "0 18px",
+          fontFamily: "'Orbitron', monospace",
+          fontSize: 10,
+          letterSpacing: 2,
+          color: "rgba(0,212,170,0.5)",
+          borderLeft: "1px solid rgba(0,212,170,0.15)",
+        }}
+      >
+        PROHAWKE
+      </div>
     </div>
   );
 }
 
-function SponsorColumn({ sponsors, reverse }) {
+export function SponsorColumn({ sponsors, reverse }) {
   const [offset, setOffset] = useState(0);
-  useEffect(() => { const id = setInterval(() => setOffset(o => o + (reverse ? -0.3 : 0.3)), 16); return () => clearInterval(id); }, [reverse]);
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      setOffset((o) => o + (reverse ? -0.4 : 0.4));
+    }, 16);
+    return () => clearInterval(id);
+  }, [reverse]);
+
   const doubled = [...sponsors, ...sponsors];
-  const cardH = 110, total = sponsors.length * cardH;
+  const cardH = 140; // 🔥 increased card height
+  const total = sponsors.length * cardH;
   const y = ((offset % total) + total) % total;
+
   return (
     <div style={{ overflow: "hidden", height: "100%" }}>
-      <div style={{ transform: `translateY(${reverse ? y - total : -y}px)` }}>
+      <div
+        style={{
+          transform: `translateY(${reverse ? y - total : -y}px)`,
+        }}
+      >
         {doubled.map((s, i) => (
-          <div key={i} style={{ height: cardH - 10, margin: "5px 8px", background: "rgba(255,255,255,0.02)", border: `1px solid ${s.color}33`, borderRadius: 10, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6 }}>
-            <div style={{ width: 40, height: 40, borderRadius: 8, background: `${s.color}22`, border: `1px solid ${s.color}44`, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Orbitron', monospace", fontWeight: 700, fontSize: 10, color: s.color }}>{s.letter}</div>
-            <span style={{ fontFamily: "'Rajdhani', sans-serif", fontSize: 9, color: "rgba(255,255,255,0.3)", letterSpacing: 1 }}>{s.name.toUpperCase()}</span>
+          <div
+            key={i}
+            style={{
+              height: cardH - 10,
+              margin: "6px 10px",
+              background: "rgba(255,255,255,0.03)",
+              border: `1px solid ${s.color}44`,
+              borderRadius: 12,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 10,
+            }}
+          >
+            {/* LOGO */}
+            <div
+              style={{
+                width: 80,
+                height: 80,
+                borderRadius: 12,
+                background: `${s.color}22`,
+                border: `1px solid ${s.color}55`,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                overflow: "hidden",
+              }}
+            >
+              <img
+                src={s.logo}
+                alt={s.name}
+                style={{
+                  maxWidth: "75%",
+                  maxHeight: "75%",
+                  objectFit: "contain",
+                  filter: "brightness(1.2)",
+                }}
+                onError={(e) => {
+                  e.target.style.display = "none";
+                }}
+              />
+            </div>
+
+            {/* NAME */}
+            <span
+              style={{
+                fontFamily: "'Rajdhani', sans-serif",
+                fontSize: 11,
+                color: "rgba(255,255,255,0.5)",
+                letterSpacing: 1,
+              }}
+            >
+              {s.name.toUpperCase()}
+            </span>
           </div>
         ))}
       </div>
@@ -373,6 +587,7 @@ function WelcomeScreen() {
   return (
     <div style={{ width: "100vw", height: "100vh", background: "#020f0d", display: "flex", overflow: "hidden", position: "relative", fontFamily: "'Rajdhani', sans-serif" }}>
       <GridBg />
+      <HeaderLogos/>
       <div style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 2, background: "repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.03) 2px, rgba(0,0,0,0.03) 4px)" }} />
       <div style={{ width: 90, zIndex: 3, padding: "20px 0 60px", borderRight: "1px solid rgba(0,212,170,0.1)" }}><SponsorColumn sponsors={SPONSORS} reverse={false} /></div>
       <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", position: "relative", zIndex: 3, padding: "0 20px 44px" }}>
@@ -410,7 +625,7 @@ function WelcomeScreen() {
         </div>
         <div style={{ marginTop: 20, display: "flex", alignItems: "center", gap: 10 }}>
           <span style={{ fontSize: 11, letterSpacing: 4, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", padding: "4px 12px", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 4 }}>PRIZE POOL</span>
-          <span style={{ fontFamily: "'Orbitron', monospace", fontSize: 28, fontWeight: 900, color: "#00d4aa" }}>UPTO ₹10,000</span>
+          <span style={{ fontFamily: "'Orbitron', monospace", fontSize: 28, fontWeight: 900, color: "#00d4aa" }}>UPTO ₹6,000</span>
         </div>
         <div style={{ marginTop: 32, maxWidth: 520, textAlign: "center", opacity: quoteVisible ? 1 : 0, transition: "opacity 0.6s ease" }}>
           <p style={{ fontFamily: "'Georgia', serif", fontSize: 16, fontStyle: "italic", color: "rgba(255,255,255,0.5)", lineHeight: 1.6, margin: "0 0 6px" }}>"{q.text}"</p>
@@ -684,6 +899,37 @@ function ScoreboardScreen({ teams }) {
   );
 }
 
+
+function PptScreen({ slideIndex = 0 }) {
+  return (
+    <div style={{ width: "100vw", height: "100vh", background: "#020f0d", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", position: "relative", fontFamily: "'Rajdhani', sans-serif" }}>
+      <GridBg />
+     
+
+      <div style={{ position: "relative", zIndex: 3, width: "85vw", height: "70vh", display: "flex", flexDirection: "column", alignItems: "center" }}>
+        {/* Slide Counter */}
+     
+
+        {/* Image Container with Cyberpunk Frame */}
+        <div style={{ position: "relative", width: "100%", height: "100%", background: "rgba(0,0,0,0.4)", border: "1px solid rgba(74,158,255,0.3)", borderRadius: 12, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", boxShadow: "0 0 40px rgba(0,0,0,0.8)" }}>
+          <img 
+            src={SLIDE_IMAGES[slideIndex]} 
+            alt={`Slide ${slideIndex + 1}`} 
+            style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain", transition: "all 0.5s ease" }} 
+          />
+          
+          {/* Subtle Overlay Glow */}
+          <div style={{ position: "absolute", inset: 0, boxShadow: "inset 0 0 100px rgba(74,158,255,0.1)", pointerEvents: "none" }} />
+        </div>
+      </div>
+
+      <SponsorTicker />
+      <CornerAccents color="rgba(74,158,255,0.5)" />
+    </div>
+  );
+}
+
+
 // ─── DISPLAY APP ──────────────────────────────────────────────────────────────
 function DisplayApp() {
   const { state, teams, wsConnected } = useDisplayState();
@@ -695,12 +941,20 @@ function DisplayApp() {
       <div style={{ position: "fixed", top: 10, right: 10, zIndex: 9999 }}>
         <div style={{ width: 8, height: 8, borderRadius: "50%", background: wsConnected ? "#00d4aa" : "#ff5050", boxShadow: wsConnected ? "0 0 8px #00d4aa" : "none" }} />
       </div>
-      {screen === "scoreboard" && <ScoreboardScreen teams={teams} />}
-      {screen === "round" && subPhase === "instructions" && <RoundInstructions roundNum={roundNum} />}
-      {screen === "round" && subPhase === "countdown" && <CountdownScreen />}
-      {screen === "round" && roundNum === 3 && subPhase === "casecomp" && <Round3CaseScreen teams={teams} />}
-      {screen === "round" && subPhase === "question" && <QuestionScreen roundNum={roundNum} qIndex={qIndex} showAnswer={showAnswer} timeLeft={timeLeft} teams={teams} />}
+
+      {/* Screen Routing Logic */}
       {screen === "welcome" && <WelcomeScreen />}
+      {screen === "ppt" && <PptScreen />}
+      {screen === "scoreboard" && <ScoreboardScreen teams={teams} />}
+      
+      {screen === "round" && (
+        <>
+          {subPhase === "instructions" && <RoundInstructions roundNum={roundNum} />}
+          {subPhase === "countdown" && <CountdownScreen />}
+          {roundNum === 3 && subPhase === "casecomp" && <Round3CaseScreen teams={teams} />}
+          {subPhase === "question" && <QuestionScreen roundNum={roundNum} qIndex={qIndex} showAnswer={showAnswer} timeLeft={timeLeft} teams={teams} />}
+        </>
+      )}
     </>
   );
 }
@@ -714,13 +968,18 @@ function AdminApp() {
     addTeam, removeTeam, updateScore, setScore, resetAllScores,
   } = useAdminState();
 
-  const { screen, roundNum, subPhase, qIndex, showAnswer, timeLeft, timerRunning } = state;
+  const { screen, roundNum, subPhase, qIndex, showAnswer, timeLeft, timerRunning, slideIndex = 0 } = state;
   const [newTeamName, setNewTeamName] = useState("");
   const [tab, setTab] = useState("control");
 
   const rc = { 1: "#00d4aa", 2: "#4a9eff", 3: "#ff6b35" }[roundNum] || "#00d4aa";
   const qs = QUESTIONS[`round${roundNum}`] || [];
   const currentQ = qs[qIndex];
+
+  // Helper to sync slide changes
+  const updateSlide = (newIdx) => {
+    patchState({ slideIndex: newIdx });
+  };
 
   const tabStyle = t => ({ padding: "10px 24px", fontFamily: "'Orbitron', monospace", fontSize: 11, letterSpacing: 2, cursor: "pointer", border: "none", borderRadius: 8, background: tab === t ? "#00d4aa" : "rgba(0,212,170,0.08)", color: tab === t ? "#000" : "#00d4aa", fontWeight: 700, transition: "all 0.2s" });
   const inBtn = (label, onClick, color = "#00d4aa", disabled = false) => (
@@ -730,7 +989,6 @@ function AdminApp() {
   return (
     <div style={{ minHeight: "100vh", background: "#020f0d", color: "#fff", fontFamily: "'Rajdhani', sans-serif" }}>
       <GridBg />
-      {/* Header */}
       <div style={{ position: "relative", zIndex: 3, padding: "18px 32px", borderBottom: "1px solid rgba(0,212,170,0.1)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <div>
           <div style={{ fontFamily: "'Orbitron', monospace", fontSize: 20, fontWeight: 900, color: "#00d4aa", letterSpacing: 2 }}>⚙ ADMIN PANEL</div>
@@ -744,14 +1002,12 @@ function AdminApp() {
         </div>
       </div>
 
-      {/* Tabs */}
       <div style={{ position: "relative", zIndex: 3, padding: "14px 32px 6px", display: "flex", gap: 8 }}>
         {["control", "teams", "scoring"].map(t => <button key={t} style={tabStyle(t)} onClick={() => setTab(t)}>{t.toUpperCase()}</button>)}
       </div>
 
       <div style={{ position: "relative", zIndex: 3, padding: "14px 32px 32px", display: "flex", flexDirection: "column", gap: 14 }}>
 
-        {/* ── CONTROL ── */}
         {tab === "control" && <>
           <div style={{ background: "rgba(0,212,170,0.04)", border: "1px solid rgba(0,212,170,0.15)", borderRadius: 14, padding: 22 }}>
             <div style={{ fontSize: 11, letterSpacing: 4, color: "rgba(0,212,170,0.7)", textTransform: "uppercase", marginBottom: 14 }}>SCREEN NAVIGATION</div>
@@ -761,10 +1017,23 @@ function AdminApp() {
                 { label: "R1 INSTRUCTIONS", action: () => startRound(1), s: "#00d4aa" },
                 { label: "R2 INSTRUCTIONS", action: () => startRound(2), s: "#4a9eff" },
                 { label: "R3 INSTRUCTIONS", action: () => startRound(3), s: "#ff6b35" },
+                { label: "PPT MODE", action: () => patchState({ screen: "ppt", slideIndex: 0 }), s: "#4a9eff" },
                 { label: "SCOREBOARD", action: () => patchState({ screen: "scoreboard" }), s: "#a855f7" },
               ].map(({ label, action, s }) => <GlowButton key={label} onClick={action} color={s}>{label}</GlowButton>)}
             </div>
           </div>
+
+          {/* 🔥 PPT SLIDE CONTROLS (Only visible in PPT mode) */}
+          {screen === "ppt" && (
+            <div style={{ background: "rgba(74,158,255,0.08)", border: "1px solid rgba(74,158,255,0.3)", borderRadius: 14, padding: 22 }}>
+              <div style={{ fontSize: 11, letterSpacing: 4, color: "#4a9eff", textTransform: "uppercase", marginBottom: 14 }}>SLIDE CONTROL</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 15 }}>
+                {inBtn("◀ PREV SLIDE", () => updateSlide(Math.max(0, slideIndex - 1)), "#4a9eff", slideIndex === 0)}
+                <div style={{ padding: "0 20px", fontFamily: "'Orbitron'", color: "#fff", fontSize: 16 }}>SLIDE {slideIndex + 1} / {SLIDE_IMAGES.length}</div>
+                {inBtn("NEXT SLIDE ▶", () => updateSlide(Math.min(SLIDE_IMAGES.length - 1, slideIndex + 1)), "#4a9eff", slideIndex === SLIDE_IMAGES.length - 1)}
+              </div>
+            </div>
+          )}
 
           {screen === "round" && (
             <div style={{ background: `${rc}08`, border: `1px solid ${rc}22`, borderRadius: 14, padding: 22 }}>
@@ -808,7 +1077,6 @@ function AdminApp() {
           )}
         </>}
 
-        {/* ── TEAMS ── */}
         {tab === "teams" && (
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <div style={{ background: "rgba(0,212,170,0.04)", border: "1px solid rgba(0,212,170,0.15)", borderRadius: 14, padding: 22 }}>
@@ -838,7 +1106,6 @@ function AdminApp() {
           </div>
         )}
 
-        {/* ── SCORING ── */}
         {tab === "scoring" && (
           teams.length === 0
             ? <div style={{ textAlign: "center", padding: 60, color: "rgba(255,255,255,0.3)", fontSize: 16, letterSpacing: 2 }}>No teams. Add in TEAMS tab.</div>
@@ -866,7 +1133,6 @@ function AdminApp() {
                     );
                   })}
                 </div>
-                {/* Live standings preview */}
                 <div style={{ background: "rgba(0,212,170,0.04)", border: "1px solid rgba(0,212,170,0.15)", borderRadius: 14, padding: 22 }}>
                   <div style={{ fontSize: 11, letterSpacing: 4, color: "rgba(0,212,170,0.7)", textTransform: "uppercase", marginBottom: 14 }}>LIVE STANDINGS</div>
                   {[...teams].sort((a, b) => (b.r1 + b.r2 + b.r3) - (a.r1 + a.r2 + a.r3)).map((t, i) => {
@@ -890,16 +1156,12 @@ function AdminApp() {
 
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@400;500;600;700&display=swap');
-        @keyframes countPop{0%{transform:scale(1.4);opacity:0}100%{transform:scale(1);opacity:1}}
         @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}
-        @keyframes wsPulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:0.6;transform:scale(1.3)}}
         *{box-sizing:border-box}
-        input[type=number]::-webkit-inner-spin-button{opacity:1}
       `}</style>
     </div>
   );
 }
-
 // ─── ADMIN LOGIN ──────────────────────────────────────────────────────────────
 function AdminGate() {
   const [authed, setAuthed] = useState(false);
@@ -950,3 +1212,5 @@ export default function App() {
   const isAdmin = typeof window !== "undefined" && window.location.search.includes("admin");
   return isAdmin ? <AdminGate /> : <DisplayApp />;
 }
+
+
