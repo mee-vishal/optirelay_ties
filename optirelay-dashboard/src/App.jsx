@@ -1,68 +1,102 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
-const API = "https://optirelay-ties.onrender.com";
+// const API = "https://optirelay-ties.onrender.com";
+const API = "http://localhost:5000";
 const WS_URL = API.replace(/^https/, "wss").replace(/^http/, "ws");
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 const QUESTIONS = {
   round1: [
-    { q: "Mock Question 1", options: ["Option A", "Option B", "Option C", "Option D"], ans: 2 },
-    { q: "Mock Question 2", options: ["Option A", "Option B", "Option C", "Option D"], ans: 1 },
-    { q: "Mock Question 3", options: ["Option A", "Option B", "Option C", "Option D"], ans: 3 },
-    { q: "Mock Question 4", options: ["Option A", "Option B", "Option C", "Option D"], ans: 0 },
-    { q: "Mock Question 5", options: ["Option A", "Option B", "Option C", "Option D"], ans: 1 },
-    { q: "Mock Question 6", options: ["Option A", "Option B", "Option C", "Option D"], ans: 2 },
-    { q: "Mock Question 7", options: ["Option A", "Option B", "Option C", "Option D"], ans: 3 },
-    { q: "Mock Question 8", options: ["Option A", "Option B", "Option C", "Option D"], ans: 0 },
-    { q: "Mock Question 9", options: ["Option A", "Option B", "Option C", "Option D"], ans: 2 },
-    { q: "Mock Question 10", options: ["Option A", "Option B", "Option C", "Option D"], ans: 1 },
-    { q: "Mock Question 11", options: ["Option A", "Option B", "Option C", "Option D"], ans: 3 },
-    { q: "Mock Question 12", options: ["Option A", "Option B", "Option C", "Option D"], ans: 0 },
-    { q: "Mock Question 13", options: ["Option A", "Option B", "Option C", "Option D"], ans: 1 },
-    { q: "Mock Question 14", options: ["Option A", "Option B", "Option C", "Option D"], ans: 2 },
-    { q: "Mock Question 15", options: ["Option A", "Option B", "Option C", "Option D"], ans: 3 },
-    { q: "Mock Question 16", options: ["Option A", "Option B", "Option C", "Option D"], ans: 0 },
-    { q: "Mock Question 17", options: ["Option A", "Option B", "Option C", "Option D"], ans: 2 },
-    { q: "Mock Question 18", options: ["Option A", "Option B", "Option C", "Option D"], ans: 1 },
-    { q: "Mock Question 19", options: ["Option A", "Option B", "Option C", "Option D"], ans: 3 },
-    { q: "Mock Question 20", options: ["Option A", "Option B", "Option C", "Option D"], ans: 0 },
-    { q: "Mock Question 21", options: ["Option A", "Option B", "Option C", "Option D"], ans: 1 },
-    { q: "Mock Question 22", options: ["Option A", "Option B", "Option C", "Option D"], ans: 2 },
-    { q: "Mock Question 23", options: ["Option A", "Option B", "Option C", "Option D"], ans: 3 },
-    { q: "Mock Question 24", options: ["Option A", "Option B", "Option C", "Option D"], ans: 0 },
-    { q: "Mock Question 25", options: ["Option A", "Option B", "Option C", "Option D"], ans: 2 },
-    { q: "Mock Question 26", options: ["Option A", "Option B", "Option C", "Option D"], ans: 1 },
-    { q: "Mock Question 27", options: ["Option A", "Option B", "Option C", "Option D"], ans: 3 },
-    { q: "Mock Question 28", options: ["Option A", "Option B", "Option C", "Option D"], ans: 0 },
-    { q: "Mock Question 29", options: ["Option A", "Option B", "Option C", "Option D"], ans: 1 },
-    { q: "Mock Question 30", options: ["Option A", "Option B", "Option C", "Option D"], ans: 2 },
-  ],
-  round2: [
-    { q: "Mock Question 1", options: ["Option A"], ans: 0 },
-    { q: "Identify the logo:", options: ["Option A"], ans: 0, img: "/logos/1.png" },
-    { q: "Mock Question 3", options: ["Option A"], ans: 0 },
-    { q: "Mock Question 4", options: ["Option A"], ans: 0 },
-    { q: "Mock Question 5", options: ["Option A"], ans: 0 },
-    { q: "Solve puzzle", options: ["Option A"], ans: 0, img: "/logos/1.png" },
-    { q: "Solve puzzle", options: ["Option A"], ans: 0, img: "/logos/1.png" },
-    { q: "Mock Question 8", options: ["Option A"], ans: 0 },
-    { q: "Mock Question 9", options: ["Option A"], ans: 0 },
-    { q: "Solve puzzle", options: ["Option A"], ans: 0, img: "/logos/1.png" },
-    { q: "Mock Question 11", options: ["Option A"], ans: 0 },
-    { q: "Identify logo", options: ["Option A"], ans: 0, img: "/logos/1.png" },
-    { q: "Company related to which sector?", options: ["Option A"], ans: 0, img: "/logos/1.png" },
-    { q: "Company related to which sector?", options: ["Option A"], ans: 0, img: "/logos/1.png" },
-    { q: "Which model's previous name is this?", options: ["Option A"], ans: 0, img: "/logos/1.png" },
-    { q: "Mock Question 16", options: ["Option A"], ans: 0 },
-    { q: "Name of person OR company he was associated with?", options: ["Option A"], ans: 0, img: "/logos/1.png" },
-    { q: "Mock Question 18", options: ["Option A"], ans: 0 },
-    { q: "Mock Question 19", options: ["Option A"], ans: 0 },
-    { q: "Mock Question 20", options: ["Option A"], ans: 0 },
-    { q: "Mock Question 21", options: ["Option A"], ans: 0 },
-    { q: "Mock Question 22", options: ["Option A"], ans: 0 },
-    { q: "Name of company?", options: ["Option A"], ans: 0, img: "/logos/1.png" },
-    { q: "Name of company?", options: ["Option A"], ans: 0, img: "/logos/1.png" },
+  { q: "Which situation BEST reflects Jevons Paradox?", options: ["Efficiency reduces total consumption", "Efficiency lowers cost, increasing demand", "Efficiency has no demand impact", "Both A and C"], ans: 1 },
+
+  { q: "Why are jet engines harder to develop than rocket engines despite lower peak temperatures?", options: ["Rockets face more fatigue", "Jet engines face sustained creep and fatigue", "Both face identical conditions", "None of these"], ans: 1 },
+
+  { q: "Which is a key technological bottleneck in modern jet engines?", options: ["Polycrystalline blades", "Lack of cooling systems", "Single crystal turbine blade manufacturing", "Both A and B"], ans: 2 },
+
+  { q: "In speech-to-math AI systems, what is the MOST critical transformation step?", options: ["Direct symbolic mapping", "Vectorization into embeddings", "Grammar parsing first", "Both B and C"], ans: 3 },
+
+  { q: "In IoT ecosystems, digital twins are BEST described as:", options: ["Physical replacements", "Static visualization tools", "Dynamic virtual replicas for simulation", "Both B and C"], ans: 2 },
+
+  { q: "Which statement correctly distinguishes Eulerian and Newtonian approaches?", options: ["Eulerian tracks particles", "Newtonian ignores variation", "Eulerian observes fixed points", "Both A and B"], ans: 2 },
+
+  { q: "A company’s revenue rises from ₹200 to ₹260 crore. What is the % increase?", options: ["30%", "25%", "60%", "Both A and B"], ans: 0 },
+
+  { q: "In triangle counting puzzles, the MOST common source of error is:", options: ["Ignoring large triangles", "Double counting overlaps", "Missing rotated shapes", "All of the above"], ans: 3 },
+
+  { q: "Proof resilience differs from resilience because it is:", options: ["Only theoretical", "Mathematically verified robustness", "Limited to software", "Both B and C"], ans: 1 },
+
+  { q: "Which is generally faster during execution?", options: ["Interpreter", "Compiler", "Both equal", "Interpreter due to memory"], ans: 1 },
+
+  { q: "Which statement about ramjets is correct?", options: ["Work at zero speed", "Carry oxidizer", "Require high speed & atmospheric air", "None of these"], ans: 2 },
+
+  { q: "Which airline is linked to the largest aircraft order in history?", options: ["Emirates", "IndiGo", "American Airlines", "Air India"], ans: 3 },
+
+  { q: "Why do airlines prefer leasing aircraft?", options: ["Lower upfront capital & flexibility", "Higher maintenance cost", "Ownership reduces risk", "Both A and B"], ans: 0 },
+
+  { q: "Which scenario BEST demonstrates sunk cost fallacy?", options: ["Ignoring past costs", "Continuing due to past investment", "Future-based decisions", "Both A and C"], ans: 1 },
+
+  { q: "Customer churn ratio refers to:", options: ["Customers retained", "Customer acquisition rate", "Customers lost percentage", "Both A and B"], ans: 2 },
+
+  { q: "The Evergrande crisis was primarily due to:", options: ["Agricultural debt", "Overleveraged real estate expansion", "Banking collapse", "Both A and C"], ans: 1 },
+
+  { q: "PNG stands for:", options: ["Portable Network Graphics", "Personal Network Grid", "Pixel Navigation Graphics", "None of these"], ans: 0 },
+
+  { q: "Positive cash flow with rising working capital indicates:", options: ["Inefficiency", "Strong liquidity", "High debt", "Both A and C"], ans: 1 },
+
+  { q: "A circular supply chain focuses on:", options: ["Linear production", "Recycling and reuse", "Global sourcing", "Both A and C"], ans: 1 },
+
+  { q: "Which country holds the MOST strategic leverage over the Strait of Malacca?", options: ["India", "China", "Singapore", "None of these"], ans: 0 },
+
+  { q: "Which country dominates advanced lithography technology?", options: ["Taiwan", "Japan", "Netherlands", "China"], ans: 2 },
+
+  { q: "What is the core USP of SpaceX?", options: ["Cryogenic fuels", "Autonomous navigation", "Reusable rockets", "None of these"], ans: 2 },
+
+  { q: "Which error metric is MORE sensitive to outliers?", options: ["MAE", "MSE", "Both equal", "None"], ans: 1 },
+
+  { q: "High precision but low accuracy means:", options: ["Scattered values", "Clustered but far from true value", "Clustered near true value", "None"], ans: 1 },
+
+  { q: "Why is cast iron used in lathe beds?", options: ["High tensile strength", "Poor damping", "Good vibration damping", "Both A and B"], ans: 2 },
+
+  // NEW 5 QUESTIONS
+
+  { q: "If a startup increases revenue rapidly but burns cash faster, it risks a ________ crisis.", options: ["Liquidity", "Profitability", "Demand", "Supply"], ans: 0 },
+
+  { q: "In financial terms, EBITDA excludes interest, tax, depreciation and ________.", options: ["Amortization", "Inflation", "Dividends", "Revenue"], ans: 0 },
+
+  { q: "A trader exploiting tiny price differences across exchanges performs ________.", options: ["Speculation", "Hedging", "Arbitrage", "Shorting"], ans: 2 },
+
+  { q: "The parent company behind Claude AI is:", options: ["OpenAI", "Google", "Anthropic", "Meta"], ans: 2 },
+
+  { q: "Choosing one option means giving up another—the lost benefit is called ________ cost.", options: ["Fixed", "Marginal", "Sunk", "Opportunity"], ans: 3 }
+],
+
+   round2 :[
+
+    {q: "Cost that cannot be recovered once spent: ____ cost",options: ["sunk"],ans: 0,},
+    { q: "Identify the logo:", options: ["Job in Transit"], ans: 0,   img: "/round2/ai.png", },
+    { q: "Opposite of inflation: ____", options: ["Deflation"], ans: 0 },
+    { q: "The MOST traded currency globally: ____", options: ["Dollar"], ans: 0},
+    { q: "if dataset is small model overfits or underfits", options: ["overfit"], ans: 0 },
+    { q: "solve puzzle", options: ["3"], img:"/round2/puzzle1.png",ans: 0 },
+    { q: "solve puzzle", options: ["5"], img:"/round2/puzzle2.png",ans: 0 },
+    { q: " if bias is more  and varience is low is it underfitting or overfitting", options: ["underfitting"],ans: 0 },
+    { q: " A firm dominating market with no competition: ____", options: ["Monopoly"],ans: 0 },
+    { q: "solve puzzle", options: ["5"], img:"/round2/moon.png",ans: 0 },
+    { q: " In business, KPI stands for Key ____ Indicator", options: ["performance"],ans: 0 },
+     { q: "identify logo", options: ["nptel"], img:"/round2/puzzle2.png",ans: 0 },
+     { q: "company related to which sector ?", options: ["aviation"], img:"/round2/united.png",ans: 0 },
+     { q: "company related to which sector ?", options: ["oil and gas"], img:"/round2/exxon.png",ans: 0 },
+     { q: "which model's previous name is this ?", options: ["oil and gas"], img:"/round2/bard.png",ans: 0 },
+    { q: " In marketing, attracting customers without ads → ____ marketing", options: ["Inbound Marketing."],ans: 0 },
+     { q: "name of person OR company he was assosiated with ?", options: ["oil and gas"], img:"/round2/person.png",ans: 0 },
+    { q: " A country importing more than exporting runs a ____ deficit", options: ["Trade"],ans: 0 },
+    { q: "A sudden increase in crude oil prices primarily raises ____ costs across industries.", options: [" Transportation"],ans: 0 },
+    { q: "When a company repurchases its own shares from the market, the process is called a share ____.", options: ["Buyback"],ans: 0 },
+    { q: "The central banking authority responsible for monetary policy in India is the ____.", options: ["RBI"],ans: 0 },
+    { q: "When interest rates rise, the market value of existing bonds typically tends to ____.", options: ["Fall"],ans: 0 },
+     { q: "name of company ?", options: ["hindustan unilever"], img:"/round2/unilever.png",ans: 0 },
+     { q: "name of company ?", options: ["gs"], img:"/round2/gs.png",ans: 0 },
   ],
 };
 
@@ -543,7 +577,7 @@ function WelcomeScreen() {
           <div style={{ display: "flex", alignItems: "center", gap: 14, background: "rgba(0,212,170,0.06)", border: "1px solid rgba(0,212,170,0.22)", borderRadius: 12, padding: "10px 28px" }}>
             <span style={{ fontSize: 9, letterSpacing: 3, color: "rgba(255,255,255,0.3)", textTransform: "uppercase", fontFamily: "'Orbitron', monospace" }}>PRIZE POOL</span>
             <div style={{ width: 1, height: 20, background: "rgba(0,212,170,0.25)" }} />
-            <span style={{ fontFamily: "'Orbitron', monospace", fontSize: 24, fontWeight: 900, color: "#00d4aa" }}>UPTO ₹6,000</span>
+            <span style={{ fontFamily: "'Orbitron', monospace", fontSize: 24, fontWeight: 900, color: "#00d4aa" }}>UPTO ₹10,000</span>
           </div>
           <div style={{ maxWidth: 500, textAlign: "center", opacity: quoteVisible ? 1 : 0, transition: "opacity 0.6s ease", padding: "8px 16px", background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10 }}>
             <p style={{ fontFamily: "'Georgia', serif", fontSize: 13, fontStyle: "italic", color: "rgba(255,255,255,0.4)", lineHeight: 1.6, margin: "0 0 5px" }}>"{q.text}"</p>
@@ -565,7 +599,7 @@ function WelcomeScreen() {
 // ─── ROUND INSTRUCTIONS ───────────────────────────────────────────────────────
 function RoundInstructions({ roundNum }) {
   const rules = {
-    1: ["30 seconds per question", "Fastest finger format — raise hand to answer", "No negative marking", "8 questions total", "Correct answer = 10 points"],
+    1: [ "TOTAL 30 QUESTIONS", "Correct answer = 5 points per question",],
     2: ["10 seconds per question", "Team discussion allowed (think time)", "Wrong answer = −5 points", "6 questions total", "Leaderboard visible during questions"],
     3: ["Each team receives the same industrial case study", "20 minutes preparation time (timer shown on screen)", "5 minute presentation per team", "Judged on feasibility, creativity & IE tools used", "Q&A round follows each presentation"],
   };
