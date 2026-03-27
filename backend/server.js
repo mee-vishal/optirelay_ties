@@ -8,9 +8,8 @@ require("dotenv").config();
 const app = express();
 
 // ─── CORS ─────────────────────────────────────────────────────────────────────
-// const allowedOrigins = ["https://optirelay.netlify.app"];
 const allowedOrigins = [
-  "http://localhost:5173", 
+  // "http://localhost:5173",
   "https://optirelay.netlify.app"
 ];
 
@@ -69,13 +68,19 @@ wss.on("connection", (ws) => {
         const allowed = [
           "screen", "roundNum", "subPhase", "qIndex",
           "showAnswer", "timeLeft", "timerRunning", "timerEndsAt",
+          "slideIndex",
         ];
-        const update = { updatedAt: Date.now() };
+        const $set = { updatedAt: Date.now() };
         for (const key of allowed) {
-          if (msg.payload[key] !== undefined) update[key] = msg.payload[key];
+          if (msg.payload[key] !== undefined) $set[key] = msg.payload[key];
         }
+        const update = { $set };
+        // FIX: Use $set operator explicitly so upsert doesn't lose existing fields.
+        // Also use setDefaultsOnInsert to ensure schema defaults apply on first create.
         const updated = await ShowState.findByIdAndUpdate(
-          "singleton", update, { new: true, upsert: true }
+          "singleton",
+          update,
+          { new: true, upsert: true, setDefaultsOnInsert: true }
         );
         broadcast({ type: "state_update", state: computeState(updated) });
       }
@@ -84,7 +89,7 @@ wss.on("connection", (ws) => {
       if (msg.type === "patch_team") {
         const { id, round, value } = msg.payload;
         const team = await Team.findByIdAndUpdate(
-          id, { [round]: Math.max(0, value) }, { new: true }
+          id, { [round]: value }, { new: true }
         );
         if (team) broadcast({ type: "team_update", team });
       }
@@ -136,7 +141,6 @@ wss.on("connection", (ws) => {
 });
 
 // ─── SERVER-SIDE TIMER TICK ───────────────────────────────────────────────────
-// Push accurate timeLeft every second while timer is running
 setInterval(async () => {
   try {
     const state = await ShowState.findById("singleton");
@@ -146,11 +150,10 @@ setInterval(async () => {
 
     if (remaining <= 0) {
       await ShowState.findByIdAndUpdate("singleton", {
-        timeLeft: 0, timerRunning: false, updatedAt: Date.now(),
+        $set: { timeLeft: 0, timerRunning: false, updatedAt: Date.now() },
       });
       broadcast({ type: "state_update", state: { timeLeft: 0, timerRunning: false } });
     } else {
-      // lightweight tick — no DB write, just push timeLeft
       broadcast({ type: "timer_tick", timeLeft: remaining });
     }
   } catch {}
@@ -174,26 +177,49 @@ const TeamSchema = new mongoose.Schema(
 );
 const Team = mongoose.model("Team", TeamSchema);
 
-const ShowStateSchema = new mongoose.Schema(
-  {
-    _id: { type: String, default: "singleton" },
-    screen: { type: String, default: "welcome" },
-    roundNum: { type: Number, default: 1 },
-    subPhase: { type: String, default: "instructions" },
-    qIndex: { type: Number, default: 0 },
-    showAnswer: { type: Boolean, default: false },
-    timeLeft: { type: Number, default: 30 },
-    timerRunning: { type: Boolean, default: false },
-    timerEndsAt: { type: Number, default: 0 },
-    updatedAt: { type: Number, default: 0 },
-  },
-  { _id: false }
-);
+// FIX: Removed { _id: false } schema option — this was preventing Mongoose from
+// correctly handling the string _id "singleton" during upserts, causing the
+// document to sometimes be re-created without persisted fields like slideIndex.
+const ShowStateSchema = new mongoose.Schema({
+  _id: { type: String, default: "singleton" },
+  screen: { type: String, default: "welcome" },
+  roundNum: { type: Number, default: 1 },
+  subPhase: { type: String, default: "instructions" },
+  qIndex: { type: Number, default: 0 },
+  showAnswer: { type: Boolean, default: false },
+  timeLeft: { type: Number, default: 30 },
+  timerRunning: { type: Boolean, default: false },
+  timerEndsAt: { type: Number, default: 0 },
+  slideIndex: { type: Number, default: 0 },
+  updatedAt: { type: Number, default: 0 },
+});
 const ShowState = mongoose.model("ShowState", ShowStateSchema);
 
 async function getState() {
   let s = await ShowState.findById("singleton");
-  if (!s) s = await ShowState.create({ _id: "singleton", updatedAt: Date.now() });
+  if (!s) {
+    s = await ShowState.create({
+      _id: "singleton",
+      screen: "welcome",
+      roundNum: 1,
+      subPhase: "instructions",
+      qIndex: 0,
+      showAnswer: false,
+      timeLeft: 30,
+      timerRunning: false,
+      timerEndsAt: 0,
+      slideIndex: 0,   // FIX: explicit default so it's always present
+      updatedAt: Date.now(),
+    });
+  }
+  // FIX: patch missing slideIndex on existing docs (migration safety)
+  if (s.slideIndex === undefined || s.slideIndex === null) {
+    s = await ShowState.findByIdAndUpdate(
+      "singleton",
+      { $set: { slideIndex: 0 } },
+      { new: true }
+    );
+  }
   return s;
 }
 
@@ -203,6 +229,10 @@ function computeState(state) {
     const remaining = Math.ceil((obj.timerEndsAt - Date.now()) / 1000);
     obj.timeLeft = Math.max(0, remaining);
     if (remaining <= 0) obj.timerRunning = false;
+  }
+  // FIX: ensure slideIndex is always a number in the broadcast state
+  if (obj.slideIndex === undefined || obj.slideIndex === null) {
+    obj.slideIndex = 0;
   }
   return obj;
 }
@@ -214,7 +244,7 @@ app.post("/admin-login", (req, res) => {
   res.json({ success: password === (process.env.ADMIN_PASSWORD || "ies2026") });
 });
 
-// ─── REST fallbacks (initial load + reconnect) ────────────────────────────────
+// ─── REST fallbacks ───────────────────────────────────────────────────────────
 app.get("/api/state", async (req, res) => {
   try { res.json(computeState(await getState())); }
   catch (err) { res.status(500).json({ error: err.message }); }
@@ -229,9 +259,9 @@ app.patch("/api/teams/:id", async (req, res) => {
   try {
     const { r1, r2, r3 } = req.body;
     const update = {};
-    if (r1 !== undefined) update.r1 = Math.max(0, r1);
-    if (r2 !== undefined) update.r2 = Math.max(0, r2);
-    if (r3 !== undefined) update.r3 = Math.max(0, r3);
+    if (r1 !== undefined) update.r1 = r1;
+    if (r2 !== undefined) update.r2 = r2;
+    if (r3 !== undefined) update.r3 = r3;
     const team = await Team.findByIdAndUpdate(req.params.id, update, { new: true });
     if (!team) return res.status(404).json({ error: "Team not found" });
     res.json(team);
