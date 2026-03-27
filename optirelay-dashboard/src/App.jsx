@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
-// const API = "https://optirelay-ties.onrender.com";
-const API = "http://localhost:5000";
+const API = "https://optirelay-ties.onrender.com";
+// const API = "http://localhost:5000";
 const WS_URL = API.replace(/^https/, "wss").replace(/^http/, "ws");
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
@@ -603,6 +603,8 @@ function RoundInstructions({ roundNum }) {
     2: ["10 seconds per question", "Team discussion allowed (think time)", "Wrong answer = −5 points", "6 questions total", "Leaderboard visible during questions"],
     3: ["Each team receives the same industrial case study", "20 minutes preparation time (timer shown on screen)", "5 minute presentation per team", "Judged on feasibility, creativity & IE tools used", "Q&A round follows each presentation"],
   };
+
+
   const colors = { 1: "#00d4aa", 2: "#4a9eff", 3: "#ff6b35" };
   const c = colors[roundNum] || "#00d4aa";
   return (
