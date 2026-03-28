@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
-const API = "https://optirelay-ties.onrender.com";
-// const API = "http://localhost:5000";
+// const API = "https://optirelay-ties.onrender.com";
+const API = "http://localhost:5000";
 const WS_URL = API.replace(/^https/, "wss").replace(/^http/, "ws");
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
@@ -22,13 +22,13 @@ const QUESTIONS = {
 
   { q: "A company’s revenue rises from ₹200 to ₹260 crore. What is the % increase?", options: ["30%", "25%", "60%", "Both A and B"], ans: 0 },
 
-  { q: "In triangle counting puzzles, the MOST common source of error is:", options: ["Ignoring large triangles", "Double counting overlaps", "Missing rotated shapes", "All of the above"], ans: 3 },
+  // { q: "In triangle counting puzzles, the MOST common source of error is:", options: ["Ignoring large triangles", "Double counting overlaps", "Missing rotated shapes", "All of the above"], ans: 3 },
 
   { q: "Proof resilience differs from resilience because it is:", options: ["Only theoretical", "Mathematically verified robustness", "Limited to software", "Both B and C"], ans: 1 },
 
   { q: "Which is generally faster during execution?", options: ["Interpreter", "Compiler", "Both equal", "Interpreter due to memory"], ans: 1 },
 
-  { q: "Which statement about ramjets is correct?", options: ["Work at zero speed", "Carry oxidizer", "Require high speed & atmospheric air", "None of these"], ans: 2 },
+  { q: "Which statement about ramjet engine is correct?", options: ["Work at zero speed", "Carry oxidizer", "Require high speed & atmospheric air", "None of these"], ans: 2 },
 
   { q: "Which airline is linked to the largest aircraft order in history?", options: ["Emirates", "IndiGo", "American Airlines", "Air India"], ans: 3 },
 
@@ -36,11 +36,15 @@ const QUESTIONS = {
 
   { q: "Which scenario BEST demonstrates sunk cost fallacy?", options: ["Ignoring past costs", "Continuing due to past investment", "Future-based decisions", "Both A and C"], ans: 1 },
 
+  { q: "Which company executed the largest share buyback program in history as of 2024, signaling massive cash reserves rather than reinvestment?", options: ["Microsoft", "Apple", "Alphabet", "Saudi Aramco"], ans: 1 },
+
+{ q: "The concept of 'too big to fail' became globally prominent after which financial crisis event exposed systemic risk in interconnected banks?", options: ["Dot-com Bubble", "Asian Financial Crisis", "2008 Lehman Brothers Collapse", "Eurozone Debt Crisis"], ans: 2 },
+
   { q: "Customer churn ratio refers to:", options: ["Customers retained", "Customer acquisition rate", "Customers lost percentage", "Both A and B"], ans: 2 },
 
   { q: "The Evergrande crisis was primarily due to:", options: ["Agricultural debt", "Overleveraged real estate expansion", "Banking collapse", "Both A and C"], ans: 1 },
 
-  { q: "PNG stands for:", options: ["Portable Network Graphics", "Personal Network Grid", "Pixel Navigation Graphics", "None of these"], ans: 0 },
+  // { q: "PNG stands for:", options: ["Portable Network Graphics", "Personal Network Grid", "Pixel Navigation Graphics", "None of these"], ans: 0 },
 
   { q: "Positive cash flow with rising working capital indicates:", options: ["Inefficiency", "Strong liquidity", "High debt", "Both A and C"], ans: 1 },
 
@@ -74,29 +78,29 @@ const QUESTIONS = {
    round2 :[
 
     {q: "Cost that cannot be recovered once spent: ____ cost",options: ["sunk"],ans: 0,},
-    { q: "Identify the logo:", options: ["Job in Transit"], ans: 0,   img: "/round2/ai.png", },
+    // { q: "Identify the logo:", options: ["Job in Transit"], ans: 0,   img: "/round2/ai.png", },
     { q: "Opposite of inflation: ____", options: ["Deflation"], ans: 0 },
-    { q: "The MOST traded currency globally: ____", options: ["Dollar"], ans: 0},
+    // { q: "The MOST traded currency globally: ____", options: ["Dollar"], ans: 0},
     { q: "if dataset is small model overfits or underfits", options: ["overfit"], ans: 0 },
-    { q: "solve puzzle", options: ["3"], img:"/round2/puzzle1.png",ans: 0 },
+    // { q: "solve puzzle", options: ["3"], img:"/round2/puzzle1.png",ans: 0 },
     { q: "solve puzzle", options: ["5"], img:"/round2/puzzle2.png",ans: 0 },
     { q: " if bias is more  and varience is low is it underfitting or overfitting", options: ["underfitting"],ans: 0 },
     { q: " A firm dominating market with no competition: ____", options: ["Monopoly"],ans: 0 },
-    { q: "solve puzzle", options: ["5"], img:"/round2/moon.png",ans: 0 },
-    { q: " In business, KPI stands for Key ____ Indicator", options: ["performance"],ans: 0 },
-     { q: "identify logo", options: ["nptel"], img:"/round2/puzzle2.png",ans: 0 },
+    // { q: "Identify logo ", options: ["5"], img:"/round2/moon.png",ans: 0 },
+    // { q: " In business, KPI stands for Key ____ Indicator", options: ["performance"],ans: 0 },
+    //  { q: "identify logo", options: ["5"], img:"/round2/puzzle2.png",ans: 0 },
      { q: "company related to which sector ?", options: ["aviation"], img:"/round2/united.png",ans: 0 },
-     { q: "company related to which sector ?", options: ["oil and gas"], img:"/round2/exxon.png",ans: 0 },
-     { q: "which model's previous name is this ?", options: ["oil and gas"], img:"/round2/bard.png",ans: 0 },
+     { q: "company related to which sector ?", options: ["oil and gas"], img:"/round2/aramco.png",ans: 0 },
+    //  { q: "which model's previous name is this ?", options: ["oil and gas"], img:"/round2/bard.png",ans: 0 },
     { q: " In marketing, attracting customers without ads → ____ marketing", options: ["Inbound Marketing."],ans: 0 },
-     { q: "name of person OR company he was assosiated with ?", options: ["oil and gas"], img:"/round2/person.png",ans: 0 },
+    //  { q: "name of person OR company he was assosiated with ?", options: ["oil and gas"], img:"/round2/person.png",ans: 0 },
     { q: " A country importing more than exporting runs a ____ deficit", options: ["Trade"],ans: 0 },
-    { q: "A sudden increase in crude oil prices primarily raises ____ costs across industries.", options: [" Transportation"],ans: 0 },
+    // { q: "A sudden increase in crude oil prices primarily raises ____ costs across industries.", options: [" Transportation"],ans: 0 },
     { q: "When a company repurchases its own shares from the market, the process is called a share ____.", options: ["Buyback"],ans: 0 },
     { q: "The central banking authority responsible for monetary policy in India is the ____.", options: ["RBI"],ans: 0 },
     { q: "When interest rates rise, the market value of existing bonds typically tends to ____.", options: ["Fall"],ans: 0 },
      { q: "name of company ?", options: ["hindustan unilever"], img:"/round2/unilever.png",ans: 0 },
-     { q: "name of company ?", options: ["gs"], img:"/round2/gs.png",ans: 0 },
+     { q: "name of company ?", options: ["Goldman Sachs."], img:"/round2/gs.png",ans: 0 },
   ],
 };
 
@@ -599,9 +603,9 @@ function WelcomeScreen() {
 // ─── ROUND INSTRUCTIONS ───────────────────────────────────────────────────────
 function RoundInstructions({ roundNum }) {
   const rules = {
-    1: [ "TOTAL 30 QUESTIONS", "Correct answer = 5 points per question",],
-    2: ["10 seconds per question", "Team discussion allowed (think time)", "Wrong answer = −5 points", "6 questions total", "Leaderboard visible during questions"],
-    3: ["Each team receives the same industrial case study", "20 minutes preparation time (timer shown on screen)", "5 minute presentation per team", "Judged on feasibility, creativity & IE tools used", "Q&A round follows each presentation"],
+    1: [ "Each question will be displayed for 20 seconds","TOTAL 30 QUESTIONS", "Correct answer = +2 points ,incorrect -1","rouond 1 score + round 2 score accounted for qualification for third round "],
+    2: ["This is a buzzer based round","15 seconds time window to press the buzzer", "right answer = +5 points, wrong answer = -2 ", "10 questions total", "Leaderboard visible during questions"],
+    3: ["Each team receives the same industrial case study based upon the Team size",  "Judged on closeness to ideal solution and minimum average time taken by team ", "Q&A round follows each presentation"],
   };
 
 
