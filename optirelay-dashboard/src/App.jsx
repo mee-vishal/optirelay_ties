@@ -589,7 +589,7 @@ function WelcomeScreen() {
 function RoundInstructions({ roundNum }) {
   const rules = {
     1: [ "Each question will be displayed for 20 seconds","TOTAL 30 QUESTIONS", "Correct answer = +2 points ,incorrect -1","rouond 1 score + round 2 score accounted for qualification for third round "],
-    2: ["This is a buzzer based round","15 seconds time window to press the buzzer", "right answer = +5 points, wrong answer = -2 ", "10 questions total", "Leaderboard visible during questions"],
+    2: ["This is a buzzer based round","10 seconds time window to press the buzzer", "right answer = +5 points, wrong answer = -2 ", "10 questions total", "Leaderboard visible during questions"],
     3: ["Each team receives the same industrial case study based upon the Team size",  "Judged on closeness to ideal solution and minimum average time taken by team ", "Q&A round follows each presentation"],
   };
 
