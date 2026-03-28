@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
-const API = "https://optirelay-ties.onrender.com";
-// const API = "http://localhost:5000";
+// const API = "https://optirelay-ties.onrender.com";
+const API = "http://localhost:5000";
 const WS_URL = API.replace(/^https/, "wss").replace(/^http/, "ws");
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
@@ -20,9 +20,7 @@ const QUESTIONS = {
 
   { q: "Which statement correctly distinguishes Eulerian and Newtonian approaches?", options: ["Eulerian tracks particles", "Newtonian ignores variation", "Eulerian observes fixed points", "Both A and B"], ans: 2 },
 
-  { q: "A company’s revenue rises from ₹200 to ₹260 crore. What is the % increase?", options: ["30%", "25%", "60%", "Both A and B"], ans: 0 },
-
-  // { q: "In triangle counting puzzles, the MOST common source of error is:", options: ["Ignoring large triangles", "Double counting overlaps", "Missing rotated shapes", "All of the above"], ans: 3 },
+  { q: "A company's revenue rises from ₹200 to ₹260 crore. What is the % increase?", options: ["30%", "25%", "60%", "Both A and B"], ans: 0 },
 
   { q: "Proof resilience differs from resilience because it is:", options: ["Only theoretical", "Mathematically verified robustness", "Limited to software", "Both B and C"], ans: 1 },
 
@@ -38,13 +36,11 @@ const QUESTIONS = {
 
   { q: "Which company executed the largest share buyback program in history as of 2024, signaling massive cash reserves rather than reinvestment?", options: ["Microsoft", "Apple", "Alphabet", "Saudi Aramco"], ans: 1 },
 
-{ q: "The concept of 'too big to fail' became globally prominent after which financial crisis event exposed systemic risk in interconnected banks?", options: ["Dot-com Bubble", "Asian Financial Crisis", "2008 Lehman Brothers Collapse", "Eurozone Debt Crisis"], ans: 2 },
+  { q: "The concept of 'too big to fail' became globally prominent after which financial crisis event exposed systemic risk in interconnected banks?", options: ["Dot-com Bubble", "Asian Financial Crisis", "2008 Lehman Brothers Collapse", "Eurozone Debt Crisis"], ans: 2 },
 
   { q: "Customer churn ratio refers to:", options: ["Customers retained", "Customer acquisition rate", "Customers lost percentage", "Both A and B"], ans: 2 },
 
   { q: "The Evergrande crisis was primarily due to:", options: ["Agricultural debt", "Overleveraged real estate expansion", "Banking collapse", "Both A and C"], ans: 1 },
-
-  // { q: "PNG stands for:", options: ["Portable Network Graphics", "Personal Network Grid", "Pixel Navigation Graphics", "None of these"], ans: 0 },
 
   { q: "Positive cash flow with rising working capital indicates:", options: ["Inefficiency", "Strong liquidity", "High debt", "Both A and C"], ans: 1 },
 
@@ -62,8 +58,6 @@ const QUESTIONS = {
 
   { q: "Why is cast iron used in lathe beds?", options: ["High tensile strength", "Poor damping", "Good vibration damping", "Both A and B"], ans: 2 },
 
-  // NEW 5 QUESTIONS
-
   { q: "If a startup increases revenue rapidly but burns cash faster, it risks a ________ crisis.", options: ["Liquidity", "Profitability", "Demand", "Supply"], ans: 0 },
 
   { q: "In financial terms, EBITDA excludes interest, tax, depreciation and ________.", options: ["Amortization", "Inflation", "Dividends", "Revenue"], ans: 0 },
@@ -78,24 +72,15 @@ const QUESTIONS = {
    round2 :[
 
     {q: "Cost that cannot be recovered once spent: ____ cost",options: ["sunk"],ans: 0,},
-    // { q: "Identify the logo:", options: ["Job in Transit"], ans: 0,   img: "/round2/ai.png", },
     { q: "Opposite of inflation: ____", options: ["Deflation"], ans: 0 },
-    // { q: "The MOST traded currency globally: ____", options: ["Dollar"], ans: 0},
     { q: "if dataset is small model overfits or underfits", options: ["overfit"], ans: 0 },
-    // { q: "solve puzzle", options: ["3"], img:"/round2/puzzle1.png",ans: 0 },
     { q: "solve puzzle", options: ["5"], img:"/round2/puzzle2.png",ans: 0 },
     { q: " if bias is more  and varience is low is it underfitting or overfitting", options: ["underfitting"],ans: 0 },
     { q: " A firm dominating market with no competition: ____", options: ["Monopoly"],ans: 0 },
-    // { q: "Identify logo ", options: ["5"], img:"/round2/moon.png",ans: 0 },
-    // { q: " In business, KPI stands for Key ____ Indicator", options: ["performance"],ans: 0 },
-    //  { q: "identify logo", options: ["5"], img:"/round2/puzzle2.png",ans: 0 },
      { q: "company related to which sector ?", options: ["aviation"], img:"/round2/united.png",ans: 0 },
      { q: "company related to which sector ?", options: ["oil and gas"], img:"/round2/aramco.png",ans: 0 },
-    //  { q: "which model's previous name is this ?", options: ["oil and gas"], img:"/round2/bard.png",ans: 0 },
     { q: " In marketing, attracting customers without ads → ____ marketing", options: ["Inbound Marketing."],ans: 0 },
-    //  { q: "name of person OR company he was assosiated with ?", options: ["oil and gas"], img:"/round2/person.png",ans: 0 },
     { q: " A country importing more than exporting runs a ____ deficit", options: ["Trade"],ans: 0 },
-    // { q: "A sudden increase in crude oil prices primarily raises ____ costs across industries.", options: [" Transportation"],ans: 0 },
     { q: "When a company repurchases its own shares from the market, the process is called a share ____.", options: ["Buyback"],ans: 0 },
     { q: "The central banking authority responsible for monetary policy in India is the ____.", options: ["RBI"],ans: 0 },
     { q: "When interest rates rise, the market value of existing bonds typically tends to ____.", options: ["Fall"],ans: 0 },
@@ -608,7 +593,6 @@ function RoundInstructions({ roundNum }) {
     3: ["Each team receives the same industrial case study based upon the Team size",  "Judged on closeness to ideal solution and minimum average time taken by team ", "Q&A round follows each presentation"],
   };
 
-
   const colors = { 1: "#00d4aa", 2: "#4a9eff", 3: "#ff6b35" };
   const c = colors[roundNum] || "#00d4aa";
   return (
@@ -839,38 +823,87 @@ function QuestionScreen({ roundNum, qIndex, showAnswer, timeLeft, teams }) {
   );
 }
 
+// ─── SCOREBOARD SCREEN (TWO-COLUMN SPLIT) ─────────────────────────────────────
 function ScoreboardScreen({ teams }) {
   const sorted = [...teams].sort((a, b) => (b.r1 + b.r2 + b.r3) - (a.r1 + a.r2 + a.r3));
   const podiumColors = ["#FFD700", "#C0C0C0", "#CD7F32"];
   const medals = ["🥇", "🥈", "🥉"];
+
+  // Split teams into two halves for two-column layout
+  const mid = Math.ceil(sorted.length / 2);
+  const leftTeams = sorted.slice(0, mid);
+  const rightTeams = sorted.slice(mid);
+
+  const TeamRow = ({ team, i }) => {
+    const total = team.r1 + team.r2 + team.r3;
+    const isTop = i < 3;
+    const c = isTop ? podiumColors[i] : "rgba(255,255,255,0.7)";
+    return (
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: "52px 1fr 60px 60px 60px 80px",
+        gap: 10,
+        padding: "14px 16px",
+        background: isTop ? `${podiumColors[i]}10` : "rgba(255,255,255,0.02)",
+        border: `1px solid ${isTop ? podiumColors[i] + "44" : "rgba(255,255,255,0.06)"}`,
+        borderRadius: 12,
+        alignItems: "center",
+      }}>
+        <span style={{ fontFamily: "'Orbitron', monospace", fontSize: 18, fontWeight: 900, color: c }}>{medals[i] || `#${i + 1}`}</span>
+        <span style={{ fontSize: 16, fontWeight: 700, color: "#fff", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{team.name}</span>
+        {[team.r1, team.r2, team.r3].map((s, ri) => (
+          <span key={ri} style={{ fontFamily: "'Orbitron', monospace", fontSize: 14, color: "rgba(255,255,255,0.5)", textAlign: "center" }}>{s}</span>
+        ))}
+        <span style={{ fontFamily: "'Orbitron', monospace", fontSize: 20, fontWeight: 900, color: c, textAlign: "center" }}>{total}</span>
+      </div>
+    );
+  };
+
   return (
     <div style={{ width: "100vw", height: "100vh", background: "#020f0d", display: "flex", flexDirection: "column", position: "relative", fontFamily: "'Rajdhani', sans-serif" }}>
       <GridBg />
-      <div style={{ position: "relative", zIndex: 3, display: "flex", flexDirection: "column", alignItems: "center", padding: "36px 60px 60px", flex: 1 }}>
+      <div style={{ position: "relative", zIndex: 3, display: "flex", flexDirection: "column", alignItems: "center", padding: "28px 48px 0", flexShrink: 0 }}>
         <div style={{ fontFamily: "'Orbitron', monospace", fontSize: 13, letterSpacing: 8, color: "#00d4aa", marginBottom: 8 }}>OPTIRELAY 2026</div>
-        <h1 style={{ fontFamily: "'Orbitron', monospace", fontSize: "clamp(32px, 5vw, 64px)", fontWeight: 900, margin: "0 0 8px", color: "#fff" }}>FINAL LEADERBOARD</h1>
-        <div style={{ width: 160, height: 2, background: "linear-gradient(90deg, transparent, #00d4aa, transparent)", marginBottom: 36 }} />
-        {teams.length === 0
-          ? <div style={{ color: "rgba(255,255,255,0.3)", fontSize: 20, letterSpacing: 4 }}>NO TEAMS YET</div>
-          : <div style={{ width: "100%", maxWidth: 900, display: "flex", flexDirection: "column", gap: 10 }}>
-              <div style={{ display: "grid", gridTemplateColumns: "60px 1fr 100px 100px 100px 120px", gap: 14, padding: "8px 20px", fontSize: 10, letterSpacing: 3, color: "rgba(255,255,255,0.3)", textTransform: "uppercase" }}>
-                <span>#</span><span>TEAM</span><span style={{ textAlign: "center" }}>R1</span><span style={{ textAlign: "center" }}>R2</span><span style={{ textAlign: "center" }}>R3</span><span style={{ textAlign: "center" }}>TOTAL</span>
+        <h1 style={{ fontFamily: "'Orbitron', monospace", fontSize: "clamp(28px, 4vw, 56px)", fontWeight: 900, margin: "0 0 8px", color: "#fff" }}>FINAL LEADERBOARD</h1>
+        <div style={{ width: 160, height: 2, background: "linear-gradient(90deg, transparent, #00d4aa, transparent)", marginBottom: 20 }} />
+
+        {/* Column header */}
+        {teams.length > 0 && (
+          <div style={{ width: "100%", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
+            {[0, 1].map(col => (
+              <div key={col} style={{ display: "grid", gridTemplateColumns: "52px 1fr 60px 60px 60px 80px", gap: 10, padding: "6px 16px", fontSize: 10, letterSpacing: 3, color: "rgba(255,255,255,0.3)", textTransform: "uppercase" }}>
+                <span>#</span><span>TEAM</span>
+                <span style={{ textAlign: "center" }}>R1</span>
+                <span style={{ textAlign: "center" }}>R2</span>
+                <span style={{ textAlign: "center" }}>R3</span>
+                <span style={{ textAlign: "center" }}>TOTAL</span>
               </div>
-              {sorted.map((team, i) => {
-                const total = team.r1 + team.r2 + team.r3;
-                const isTop = i < 3;
-                const c = isTop ? podiumColors[i] : "rgba(255,255,255,0.7)";
-                return (
-                  <div key={team._id || team.id} style={{ display: "grid", gridTemplateColumns: "60px 1fr 100px 100px 100px 120px", gap: 14, padding: "18px 20px", background: isTop ? `${podiumColors[i]}10` : "rgba(255,255,255,0.02)", border: `1px solid ${isTop ? podiumColors[i] + "44" : "rgba(255,255,255,0.06)"}`, borderRadius: 12, alignItems: "center" }}>
-                    <span style={{ fontFamily: "'Orbitron', monospace", fontSize: 20, fontWeight: 900, color: c }}>{medals[i] || `#${i + 1}`}</span>
-                    <span style={{ fontSize: 20, fontWeight: 700, color: "#fff" }}>{team.name}</span>
-                    {[team.r1, team.r2, team.r3].map((s, ri) => <span key={ri} style={{ fontFamily: "'Orbitron', monospace", fontSize: 17, color: "rgba(255,255,255,0.5)", textAlign: "center" }}>{s}</span>)}
-                    <span style={{ fontFamily: "'Orbitron', monospace", fontSize: 24, fontWeight: 900, color: c, textAlign: "center" }}>{total}</span>
-                  </div>
-                );
-              })}
-            </div>}
+            ))}
+          </div>
+        )}
       </div>
+
+      <div style={{ position: "relative", zIndex: 3, flex: 1, overflow: "hidden", padding: "8px 48px 68px" }}>
+        {teams.length === 0 ? (
+          <div style={{ color: "rgba(255,255,255,0.3)", fontSize: 20, letterSpacing: 4, textAlign: "center", paddingTop: 60 }}>NO TEAMS YET</div>
+        ) : (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24, height: "100%" }}>
+            {/* Left column */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, overflowY: "auto" }}>
+              {leftTeams.map((team, i) => (
+                <TeamRow key={team._id || team.id} team={team} i={i} />
+              ))}
+            </div>
+            {/* Right column — indices continue from where left column ends */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, overflowY: "auto" }}>
+              {rightTeams.map((team, i) => (
+                <TeamRow key={team._id || team.id} team={team} i={mid + i} />
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
       <SponsorTicker /><CornerAccents />
     </div>
   );
@@ -1045,9 +1078,6 @@ function AdminApp() {
   const qs = QUESTIONS[`round${roundNum}`] || [];
   const currentQ = qs[qIndex];
 
-  // ─── FIX 1: Always include screen:"ppt" when updating slide index.
-  // This ensures the server always persists both fields together, preventing
-  // a stale full_state from resetting slideIndex after a reconnect.
   const updateSlide = (newIdx) => {
     patchState({ screen: "ppt", slideIndex: newIdx });
   };
@@ -1058,9 +1088,11 @@ function AdminApp() {
   );
 
   return (
-    <div style={{ minHeight: "100vh", background: "#020f0d", color: "#fff", fontFamily: "'Rajdhani', sans-serif" }}>
+    <div style={{ height: "100vh", background: "#020f0d", color: "#fff", fontFamily: "'Rajdhani', sans-serif", display: "flex", flexDirection: "column", overflow: "hidden" }}>
       <GridBg />
-      <div style={{ position: "relative", zIndex: 3, padding: "18px 32px", borderBottom: "1px solid rgba(0,212,170,0.1)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+
+      {/* ── Fixed header ── */}
+      <div style={{ position: "relative", zIndex: 3, padding: "18px 32px", borderBottom: "1px solid rgba(0,212,170,0.1)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", flexShrink: 0 }}>
         <div>
           <div style={{ fontFamily: "'Orbitron', monospace", fontSize: 20, fontWeight: 900, color: "#00d4aa", letterSpacing: 2 }}>⚙ ADMIN PANEL</div>
           <div style={{ fontSize: 11, letterSpacing: 3, color: "rgba(255,255,255,0.3)", marginTop: 2 }}>OPTIRELAY 2026 · NIT JALANDHAR</div>
@@ -1073,11 +1105,14 @@ function AdminApp() {
         </div>
       </div>
 
-      <div style={{ position: "relative", zIndex: 3, padding: "14px 32px 6px", display: "flex", gap: 8 }}>
+      {/* ── Fixed tab bar ── */}
+      <div style={{ position: "relative", zIndex: 3, padding: "14px 32px 6px", display: "flex", gap: 8, flexShrink: 0 }}>
         {["control", "teams", "scoring"].map(t => <button key={t} style={tabStyle(t)} onClick={() => setTab(t)}>{t.toUpperCase()}</button>)}
       </div>
 
-      <div style={{ position: "relative", zIndex: 3, padding: "14px 32px 32px", display: "flex", flexDirection: "column", gap: 14 }}>
+      {/* ── Scrollable content area ── */}
+      <div style={{ position: "relative", zIndex: 3, flex: 1, overflowY: "auto", padding: "14px 32px 32px", display: "flex", flexDirection: "column", gap: 14 }}>
+
         {tab === "control" && <>
           <div style={{ background: "rgba(0,212,170,0.04)", border: "1px solid rgba(0,212,170,0.15)", borderRadius: 14, padding: 22 }}>
             <div style={{ fontSize: 11, letterSpacing: 4, color: "rgba(0,212,170,0.7)", textTransform: "uppercase", marginBottom: 14 }}>SCREEN NAVIGATION</div>
@@ -1087,9 +1122,6 @@ function AdminApp() {
                 { label: "R1 INSTRUCTIONS", action: () => startRound(1), s: "#00d4aa" },
                 { label: "R2 INSTRUCTIONS", action: () => startRound(2), s: "#4a9eff" },
                 { label: "R3 INSTRUCTIONS", action: () => startRound(3), s: "#ff6b35" },
-                // ─── FIX 2: Removed hardcoded slideIndex: 0 from PPT MODE button.
-                // Previously this reset the slide to 0 every time you clicked "PPT MODE",
-                // even if you had already advanced to a later slide.
                 { label: "PPT MODE", action: () => patchState({ screen: "ppt" }), s: "#4a9eff" },
                 { label: "SCOREBOARD", action: () => patchState({ screen: "scoreboard" }), s: "#a855f7" },
               ].map(({ label, action, s }) => <GlowButton key={label} onClick={action} color={s}>{label}</GlowButton>)}
@@ -1200,12 +1232,16 @@ function AdminApp() {
 
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@400;500;600;700&display=swap');
-        html, body { overflow: hidden !important; margin: 0; padding: 0; height: 100%; }
-        #root { overflow: hidden; height: 100%; }
+        html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; }
+        #root { height: 100%; overflow: hidden; }
         input[type=number]::-webkit-inner-spin-button,
         input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
         input[type=number] { -moz-appearance: textfield; }
         * { box-sizing: border-box; }
+        ::-webkit-scrollbar { width: 5px; }
+        ::-webkit-scrollbar-track { background: rgba(255,255,255,0.03); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb { background: rgba(0,212,170,0.25); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(0,212,170,0.45); }
       `}</style>
     </div>
   );
