@@ -104,7 +104,7 @@ const SPONSORS = [
 ];
 
 const SLIDE_IMAGES = ["/logos/1.png", "/logos/2.png", "/logos/3.png"];
-const ROUND_TIMERS = { 1: 30, 2: 10 };
+const ROUND_TIMERS = { 1: 20, 2: 10 };
 
 // ─── WEBSOCKET HOOK ───────────────────────────────────────────────────────────
 function useWebSocket(onMessage) {
