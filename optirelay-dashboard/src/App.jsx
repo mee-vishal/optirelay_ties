@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 
 // ─── CONFIG ───────────────────────────────────────────────────────────────────
-// const API = "https://optirelay-ties.onrender.com";
-const API = "http://localhost:5000";
+const API = "https://optirelay-ties.onrender.com";
+// const API = "http://localhost:5000";
 const WS_URL = API.replace(/^https/, "wss").replace(/^http/, "ws");
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
